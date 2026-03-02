@@ -1,26 +1,56 @@
 # Grafana dashboard provisioning (dittybopper)
 
-This guide documents how to provision Grafana dashboards from ConfigMaps so they persist across pod restarts when using dittybopper (e.g. in the `dittybopper` namespace). Without this setup, manually imported dashboards are stored only in the pod and are lost when the Grafana pod restarts.
+Provision Grafana dashboards from JSON files so they persist across pod restarts when using dittybopper.
 
-**Script:** [setup-grafana-dashboards.sh](setup-grafana-dashboards.sh) does provider + optional dashboard ConfigMap and deployment patch. Usage: `./setup-grafana-dashboards.sh [namespace] [dashboard1.json ...]`
+## Running the script with JSON files
 
-## Prerequisites
+From the repo root (or with paths adjusted), run the script and pass one or more dashboard JSON files.
+
+**Single dashboard (default namespace `dittybopper`):**
+
+```bash
+./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json
+```
+
+**Multiple dashboards:**
+
+```bash
+./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json monitoring/dashboard/other-dashboard.json
+```
+
+**Custom namespace:**
+
+```bash
+./monitoring/scripts/provision-grafana-dashboards.sh my-grafana-ns monitoring/dashboard/desched-cnv.json
+```
+
+**Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); first argument is only treated as namespace if it does not end in `.json`. Script: [provision-grafana-dashboards.sh](../scripts/provision-grafana-dashboards.sh).
+
+---
+
+## Explanation
+
+Optional reading: what the script does, how it works, and manual/troubleshooting details.
+
+### Prerequisites
 
 - `oc` CLI logged into the cluster
 - Dittybopper (Grafana) already deployed in a namespace (this doc uses `dittybopper` as the namespace; adjust if yours differs)
 - A dashboard JSON file (exported from Grafana or from a file)
 
-## Overview
+### What it does / Overview
 
 Dittybopper’s deployment does not mount ConfigMaps labeled `grafana_dashboard=1` by default. To make dashboards persistent you must:
 
 1. Create a **dashboard provider** ConfigMap so Grafana knows where to load dashboards from.
-2. Create a **dashboard** ConfigMap with your dashboard JSON.
+2. Create a **dashboard** ConfigMap with your dashboard JSON (or multiple JSON files in one ConfigMap named `grafana-dashboards-default`).
 3. **Patch the dittybopper deployment** to mount both ConfigMaps into the Grafana container.
+
+The script performs all of these steps (and rollout) for you when you pass a namespace and optional JSON files. The sections below describe each step in detail for manual setup or reference.
 
 ---
 
-## Step 1: Create the dashboard provider ConfigMap
+### Step 1: Create the dashboard provider ConfigMap
 
 This tells Grafana to load dashboard JSON files from a specific path inside the container.
 
@@ -48,7 +78,7 @@ Use your actual namespace in place of `dittybopper` if different.
 
 ---
 
-## Step 2: Export and create the dashboard ConfigMap
+### Step 2: Export and create the dashboard ConfigMap
 
 ### 2a. Export the dashboard from Grafana (if needed)
 
@@ -57,22 +87,29 @@ Use your actual namespace in place of `dittybopper` if different.
 3. Choose **Export for sharing externally** (or “Save to file”).
 4. Save the file locally (e.g. `my-dashboard.json`).
 
-### 2b. Create a ConfigMap from the JSON file
+### 2b. Create a ConfigMap from the JSON file(s)
 
-From the directory where the JSON file is:
+The script uses a single ConfigMap named `grafana-dashboards-default` and can include multiple JSON files (each becomes a key in the ConfigMap). To do the same manually, from the directory where the JSON file(s) are:
 
 ```bash
-# Replace my-dashboard and my-dashboard.json with your names.
-# The key (filename) will appear as the file name inside the container.
-oc create configmap my-dashboard \
+# Single file; replace my-dashboard.json with your file. Use grafana-dashboards-default to match the script.
+oc create configmap grafana-dashboards-default \
   --from-file=my-dashboard.json \
   -n dittybopper
 ```
 
-To force the key to be `dashboard.json` (some setups expect this name):
+Multiple dashboards (script behavior):
 
 ```bash
-oc create configmap my-dashboard \
+oc create configmap grafana-dashboards-default \
+  --from-file=dashboard1.json --from-file=dashboard2.json \
+  -n dittybopper
+```
+
+To force a key to be `dashboard.json` (some setups expect this name):
+
+```bash
+oc create configmap grafana-dashboards-default \
   --from-file=dashboard.json=my-dashboard.json \
   -n dittybopper
 ```
@@ -80,12 +117,12 @@ oc create configmap my-dashboard \
 Optional: add the label `grafana_dashboard=1` for consistency with other setups (dittybopper does not use it for mounting; the mount is done in Step 3):
 
 ```bash
-oc label configmap my-dashboard grafana_dashboard=1 -n dittybopper
+oc label configmap grafana-dashboards-default grafana_dashboard=1 -n dittybopper
 ```
 
 ---
 
-## Step 3: Mount the ConfigMaps in the dittybopper deployment
+### Step 3: Mount the ConfigMaps in the dittybopper deployment
 
 Add two volumes to the Grafana container so it sees the provider config and the dashboard JSON.
 
@@ -101,19 +138,19 @@ oc set volume deployment/dittybopper -n dittybopper \
   -c dittybopper
 ```
 
-**Dashboard ConfigMap** (so Grafana sees your JSON under the path configured in the provider):
+**Dashboard ConfigMap** (so Grafana sees your JSON under the path configured in the provider). The script uses the name `grafana-dashboards-default`:
 
 ```bash
 oc set volume deployment/dittybopper -n dittybopper \
   --add \
-  --name=my-dashboard \
+  --name=grafana-dashboards-default \
   --type=configmap \
-  --configmap-name=my-dashboard \
+  --configmap-name=grafana-dashboards-default \
   --mount-path=/etc/grafana/provisioning/dashboards/default \
   -c dittybopper
 ```
 
-Replace `my-dashboard` with the name of the ConfigMap you created in Step 2.
+If you created a ConfigMap with a different name in Step 2, use that name for `--name` and `--configmap-name`. When the script updates the dashboards ConfigMap, it restarts the deployment so the pod picks up the new JSON.
 
 Wait for the rollout to finish:
 
@@ -123,7 +160,7 @@ oc rollout status deployment/dittybopper -n dittybopper --timeout=120s
 
 ---
 
-## Step 4: Verify
+### Step 4: Verify
 
 1. Open Grafana and go to **Dashboards** (or **Explore**).
 2. The provisioned dashboard should appear (title comes from the dashboard JSON).
@@ -147,14 +184,15 @@ You should see `dashboards.yaml` and, under `default/`, your JSON file(s).
 
 ---
 
-## Adding more dashboards
+### Adding more dashboards
 
-- **Option A (same ConfigMap):** Add another key to the same ConfigMap and re-apply (e.g. another JSON file). Then restart the deployment so the new file is mounted.
-- **Option B (new ConfigMap):** Create a new ConfigMap with a different dashboard JSON. Add a second volume mounting it into a **new** folder under provisioning, and extend `dashboards.yaml` with another provider for that path. Alternatively, mount under `default` (e.g. `.../default/extra`) only if your Grafana supports nested paths for the same provider; otherwise add a second provider and path.
+- **Using the script:** Re-run the script with the same namespace and **all** dashboard JSON files you want (e.g. `./provision-grafana-dashboards.sh dittybopper dash1.json dash2.json new-dash.json`). The script replaces the `grafana-dashboards-default` ConfigMap with one containing every file you pass and restarts the deployment.
+- **Manual (same ConfigMap):** Add another key to the `grafana-dashboards-default` ConfigMap and re-apply, then restart the deployment so the new file is mounted.
+- **Manual (separate ConfigMap):** Create a new ConfigMap and add a second volume mounting it into a new folder under provisioning, and extend `dashboards.yaml` with another provider for that path.
 
 ---
 
-## Troubleshooting
+### Troubleshooting
 
 - **Dashboard does not appear after Step 3**  
   - Check that the JSON is valid and is the format Grafana expects (e.g. export from Grafana and use that file).  
