@@ -77,7 +77,7 @@ doit=1
 quiet=0
 
 fatal() {
-    echo "${C_ERR}$*${C_RST}"
+    echo "${C_ERR}$*${C_RST}" >&2
     exit 1
 }
 
@@ -161,7 +161,7 @@ EOF
 }
 
 usage_error() {
-    echo "$*" >&2
+    echo "${C_ERR}$*${C_RST}" >&2
     echo "Try '$0 --help' for more information." >&2
     exit 1
 }
