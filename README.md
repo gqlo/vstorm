@@ -1,17 +1,17 @@
 # vstorm
 
-Scale up hundreds of VMs across multiple namespaces with a single command on
+Spin up hundreds of VMs across multiple namespaces with a single command on
 OpenShift Virtualization -- no YAML to write. It auto-detects
 storage access modes, clone strategy, and snapshot support from the cluster, so
 it works out of the box with OCS/Ceph, LVMS, NFS, or any block-capable storage
 class. No storage class at all? Use `--containerdisk` to boot VMs directly from
 a container image with no PVC required. Each run gets a unique batch ID for easy inspection and cleanup.
-Cloud-init injection lets you push custom workloads (e.g. stress-ng) at boot.
+Cloud-init injection runs custom workloads (e.g. stress-ng) at VM boot.
 Integrated cluster profiling (`--profile`) captures Go runtime-level
 performance data -- CPU, heap, mutex, and other pprof profiles -- from
 the KubeVirt control plane during batch runs.
 Backed by 193 unit tests, live cluster validation, and CI on every push
-(as of Feb 2026).
+(as of March 2026).
 
 ---
 
