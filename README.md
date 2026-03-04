@@ -1,4 +1,4 @@
-# vstorm
+# Vstorm
 
 Spin up hundreds of VMs across multiple namespaces with a single command on
 OpenShift Virtualization -- no YAML to write. It auto-detects
