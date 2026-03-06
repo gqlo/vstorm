@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # DataSource DV template structure
 # ---------------------------------------------------------------
 @test "DataSource DV uses storage API with explicit size" {
-  run bash "$VMSPAWN" -n --batch-id=yaml01 --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=yaml01 --datasource=rhel9 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # Uses storage: (not pvc:)
@@ -36,7 +36,7 @@ setup_file() {
 # URL DV template structure
 # ---------------------------------------------------------------
 @test "URL DV uses source.http.url with explicit storage size" {
-  run bash "$VMSPAWN" -n --batch-id=yaml02 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=yaml02 --vms=1 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2 --storage-size=50Gi
   [ "$status" -eq 0 ]
 
@@ -48,7 +48,7 @@ setup_file() {
 # VM YAML structure
 # ---------------------------------------------------------------
 @test "VM YAML contains all expected sections" {
-  run bash "$VMSPAWN" -n --batch-id=yaml03 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=yaml03 --datasource=rhel9 --vms=1 --namespaces=1 \
     --cores=4 --memory=8Gi
   [ "$status" -eq 0 ]
 
@@ -88,7 +88,7 @@ setup_file() {
 # --stop sets run strategy to Halted
 # ---------------------------------------------------------------
 @test "--stop sets runStrategy to Halted" {
-  run bash "$VMSPAWN" -n --batch-id=yaml04 --vms=1 --namespaces=1 --stop
+  run bash "$VSTORM" -n --batch-id=yaml04 --datasource=rhel9 --vms=1 --namespaces=1 --stop
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Halted"* ]]
@@ -98,7 +98,7 @@ setup_file() {
 # VolumeSnapshot YAML structure
 # ---------------------------------------------------------------
 @test "VolumeSnapshot YAML is well-formed" {
-  run bash "$VMSPAWN" -n --batch-id=yaml05 --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=yaml05 --datasource=rhel9 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"apiVersion: snapshot.storage.k8s.io/v1"* ]]
@@ -113,7 +113,7 @@ setup_file() {
 # Namespace YAML structure
 # ---------------------------------------------------------------
 @test "Namespace YAML is well-formed" {
-  run bash "$VMSPAWN" -n --batch-id=yaml06 --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=yaml06 --datasource=rhel9 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"apiVersion: v1"* ]]
@@ -126,8 +126,8 @@ setup_file() {
 # Cloud-init Secret YAML structure
 # ---------------------------------------------------------------
 @test "Cloud-init Secret YAML is well-formed" {
-  run bash "$VMSPAWN" -n --batch-id=yaml07 --vms=1 --namespaces=1 \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml
+  run bash "$VSTORM" -n --batch-id=yaml07 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"apiVersion: v1"* ]]
@@ -148,7 +148,7 @@ setup_file() {
 # NS-1: --no-snapshot skips VolumeSnapshots entirely
 # ---------------------------------------------------------------
 @test "no-snapshot: skips VolumeSnapshot creation" {
-  run bash "$VMSPAWN" -n --batch-id=nosn01 --no-snapshot --vms=3 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=nosn01 --datasource=rhel9 --no-snapshot --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Snapshot info ---
@@ -177,7 +177,7 @@ setup_file() {
 # NS-2: --no-snapshot VMs clone directly from DataSource
 # ---------------------------------------------------------------
 @test "no-snapshot: VMs clone from DataSource instead of snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=nosn02 --no-snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=nosn02 --datasource=rhel9 --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- VM uses DataSource sourceRef (not PVC, not snapshot) ---
@@ -197,7 +197,7 @@ setup_file() {
 # NS-3: --no-snapshot with URL import
 # ---------------------------------------------------------------
 @test "no-snapshot: works with --dv-url" {
-  run bash "$VMSPAWN" -n --batch-id=nosn03 --no-snapshot --vms=2 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=nosn03 --no-snapshot --vms=2 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2
   [ "$status" -eq 0 ]
 
@@ -217,8 +217,8 @@ setup_file() {
 # NS-4: --no-snapshot with custom cloud-init
 # ---------------------------------------------------------------
 @test "no-snapshot: works with custom cloud-init" {
-  run bash "$VMSPAWN" -n --batch-id=nosn04 --no-snapshot --vms=2 --namespaces=1 \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml
+  run bash "$VSTORM" -n --batch-id=nosn04 --datasource=rhel9 --no-snapshot --vms=2 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- Cloud-init Secret created ---
@@ -239,7 +239,7 @@ setup_file() {
 # NS-5: --no-snapshot across multiple namespaces
 # ---------------------------------------------------------------
 @test "no-snapshot: multiple namespaces, 10 VMs" {
-  run bash "$VMSPAWN" -n --batch-id=nosn05 --no-snapshot --vms=10 --namespaces=3
+  run bash "$VSTORM" -n --batch-id=nosn05 --datasource=rhel9 --no-snapshot --vms=10 --namespaces=3
   [ "$status" -eq 0 ]
 
   # --- 3 namespaces ---
@@ -260,7 +260,7 @@ setup_file() {
 # NS-6: --storage-class option works
 # ---------------------------------------------------------------
 @test "storage-class option sets storage class on all resources" {
-  run bash "$VMSPAWN" -n --batch-id=nosn06 --no-snapshot --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=nosn06 --datasource=rhel9 --no-snapshot --vms=1 --namespaces=1 \
     --storage-class=my-custom-sc
   [ "$status" -eq 0 ]
 
@@ -276,7 +276,7 @@ setup_file() {
 # NS-7: --snapshot (default) still works as before
 # ---------------------------------------------------------------
 @test "explicit --snapshot produces snapshot-based flow" {
-  run bash "$VMSPAWN" -n --batch-id=nosn07 --snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=nosn07 --datasource=rhel9 --snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Snapshot mode enabled ---
@@ -294,7 +294,7 @@ setup_file() {
 # NS-8: vm-datasource.yaml template is well-formed
 # ---------------------------------------------------------------
 @test "no-snapshot: VM DataSource clone YAML is well-formed" {
-  run bash "$VMSPAWN" -n --batch-id=nosn08 --no-snapshot --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=nosn08 --datasource=rhel9 --no-snapshot --vms=1 --namespaces=1 \
     --cores=4 --memory=8Gi
   [ "$status" -eq 0 ]
 

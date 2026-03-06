@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # DC-1: Custom DataSource name propagates into each VM's inline DV
 # ---------------------------------------------------------------
 @test "datasource-clone: custom DataSource name in inline DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0001 --no-snapshot --datasource=fedora \
+  run bash "$VSTORM" -n --batch-id=dc0001 --no-snapshot --datasource=fedora \
     --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -40,7 +40,7 @@ setup_file() {
 # DC-2: Default DataSource namespace appears in each VM's inline DV
 # ---------------------------------------------------------------
 @test "datasource-clone: DataSource namespace in inline DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0002 --no-snapshot --datasource=win2k22 \
+  run bash "$VSTORM" -n --batch-id=dc0002 --no-snapshot --datasource=win2k22 \
     --basename=win2k22 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -60,7 +60,7 @@ setup_file() {
 # DC-3: Custom storage size propagates into inline DV
 # ---------------------------------------------------------------
 @test "datasource-clone: --storage-size in inline DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0003 --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=dc0003 --datasource=rhel9 --no-snapshot \
     --storage-size=50Gi --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -76,7 +76,7 @@ setup_file() {
 # DC-4: Each VM gets a uniquely named DV (not rhel9-base)
 # ---------------------------------------------------------------
 @test "datasource-clone: per-VM unique DV names" {
-  run bash "$VMSPAWN" -n --batch-id=dc0004 --no-snapshot --vms=3 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dc0004 --datasource=rhel9 --no-snapshot --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Each VM's DV has a unique name ---
@@ -92,7 +92,7 @@ setup_file() {
 # DC-5: Multiple namespaces — no base PVC per namespace
 # ---------------------------------------------------------------
 @test "datasource-clone: multi-namespace has no per-namespace base DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0005 --no-snapshot --vms=4 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=dc0005 --datasource=rhel9 --no-snapshot --vms=4 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- 2 namespaces ---
@@ -119,7 +119,7 @@ setup_file() {
 # DC-6: URL import + no-snapshot still creates base DV
 # ---------------------------------------------------------------
 @test "datasource-clone: URL import still creates base DV (not direct clone)" {
-  run bash "$VMSPAWN" -n --batch-id=dc0006 --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=dc0006 --no-snapshot \
     --dv-url=http://example.com/disk.qcow2 --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -141,7 +141,7 @@ setup_file() {
 # DC-7: Snapshot mode + DataSource still creates base DV
 # ---------------------------------------------------------------
 @test "datasource-clone: snapshot mode still creates base DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0007 --snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dc0007 --datasource=rhel9 --snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Base DV IS created ---
@@ -161,7 +161,7 @@ setup_file() {
 # DC-8: Access mode applies to inline DV in vm-datasource.yaml
 # ---------------------------------------------------------------
 @test "datasource-clone: --rwo access mode on inline DV" {
-  run bash "$VMSPAWN" -n --batch-id=dc0008 --no-snapshot --rwo --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dc0008 --datasource=rhel9 --no-snapshot --rwo --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Access mode in summary ---
@@ -187,7 +187,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteOnce
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=dc0009 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=dc0009 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -202,7 +202,7 @@ setup_file() {
 # DC-10: --stop with direct DataSource clone
 # ---------------------------------------------------------------
 @test "datasource-clone: --stop sets Halted runStrategy" {
-  run bash "$VMSPAWN" -n --batch-id=dc0010 --no-snapshot --stop --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dc0010 --datasource=rhel9 --no-snapshot --stop --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Halted"* ]]
@@ -218,7 +218,7 @@ setup_file() {
 # AD-1: custom storage class auto-disables snapshots
 # ---------------------------------------------------------------
 @test "auto-detect: custom storage-class without snapshot-class disables snapshots" {
-  run bash "$VMSPAWN" -n --batch-id=auto01 --storage-class=my-nfs-sc --vms=3 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=auto01 --datasource=rhel9 --storage-class=my-nfs-sc --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Auto-detected no-snapshot mode ---
@@ -251,7 +251,7 @@ setup_file() {
 # AD-2: custom storage-class + snapshot-class keeps snapshots
 # ---------------------------------------------------------------
 @test "auto-detect: custom storage-class with snapshot-class keeps snapshots enabled" {
-  run bash "$VMSPAWN" -n --batch-id=auto02 --storage-class=my-rbd-sc \
+  run bash "$VSTORM" -n --batch-id=auto02 --datasource=rhel9 --storage-class=my-rbd-sc \
     --snapshot-class=my-rbd-snap --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -274,7 +274,7 @@ setup_file() {
 # AD-3: custom storage-class + explicit --snapshot overrides
 # ---------------------------------------------------------------
 @test "auto-detect: custom storage-class with explicit --snapshot keeps snapshots" {
-  run bash "$VMSPAWN" -n --batch-id=auto03 --storage-class=my-ceph-sc \
+  run bash "$VSTORM" -n --batch-id=auto03 --datasource=rhel9 --storage-class=my-ceph-sc \
     --snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -291,7 +291,7 @@ setup_file() {
 # AD-4: default storage class (no --storage-class flag) keeps snapshots
 # ---------------------------------------------------------------
 @test "auto-detect: default storage class keeps snapshots enabled" {
-  run bash "$VMSPAWN" -n --batch-id=auto04 --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=auto04 --datasource=rhel9 --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Snapshot mode enabled (default) ---
@@ -309,7 +309,7 @@ setup_file() {
 # AM-1: default access mode is ReadWriteMany
 # ---------------------------------------------------------------
 @test "access-mode: default is ReadWriteMany" {
-  run bash "$VMSPAWN" -n --batch-id=am0001 --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=am0001 --datasource=rhel9 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteMany"* ]]
@@ -320,7 +320,7 @@ setup_file() {
 # AM-2: --rwo shortcut sets ReadWriteOnce on all resources
 # ---------------------------------------------------------------
 @test "access-mode: --rwo sets ReadWriteOnce on DV and VM" {
-  run bash "$VMSPAWN" -n --batch-id=am0002 --rwo --no-snapshot --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=am0002 --datasource=rhel9 --rwo --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
@@ -332,7 +332,7 @@ setup_file() {
 # AM-3: --access-mode=ReadWriteOnce
 # ---------------------------------------------------------------
 @test "access-mode: --access-mode=ReadWriteOnce" {
-  run bash "$VMSPAWN" -n --batch-id=am0003 --access-mode=ReadWriteOnce --no-snapshot --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=am0003 --datasource=rhel9 --access-mode=ReadWriteOnce --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
@@ -344,7 +344,7 @@ setup_file() {
 # AM-4: --rwx shortcut sets ReadWriteMany
 # ---------------------------------------------------------------
 @test "access-mode: --rwx sets ReadWriteMany" {
-  run bash "$VMSPAWN" -n --batch-id=am0004 --rwx --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=am0004 --datasource=rhel9 --rwx --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteMany"* ]]
@@ -355,7 +355,7 @@ setup_file() {
 # AM-5: --rwo with snapshot mode (VMs also get RWO)
 # ---------------------------------------------------------------
 @test "access-mode: --rwo applies to snapshot-based VMs too" {
-  run bash "$VMSPAWN" -n --batch-id=am0005 --rwo --snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=am0005 --datasource=rhel9 --rwo --snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
@@ -367,7 +367,7 @@ setup_file() {
 # AM-6: --rwo with URL import mode
 # ---------------------------------------------------------------
 @test "access-mode: --rwo with URL import" {
-  run bash "$VMSPAWN" -n --batch-id=am0006 --rwo --no-snapshot --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=am0006 --rwo --no-snapshot --vms=1 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2
   [ "$status" -eq 0 ]
 

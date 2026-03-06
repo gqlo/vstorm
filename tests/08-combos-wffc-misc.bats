@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -27,8 +27,8 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=cmb043 --storage-class=lvms-nvme-sc \
-    --no-snapshot --cloudinit=helpers/cloudinit-stress-workload.yaml \
+  run bash "$VSTORM" -n --batch-id=cmb043 --datasource=rhel9 --storage-class=lvms-nvme-sc \
+    --no-snapshot --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
     --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -56,7 +56,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=cmb044 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=cmb044 --storage-class=lvms-nvme-sc \
     --no-snapshot --dv-url=http://example.com/disk.qcow2 \
     --vms=1 --namespaces=1
 
@@ -80,7 +80,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=cmb045 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=cmb045 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms-per-namespace=3 --namespaces=2
 
   rm -rf "$mock_dir"
@@ -106,8 +106,8 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=cmb046 --storage-class=lvms-nvme-sc \
-    --snapshot --cloudinit=helpers/cloudinit-stress-workload.yaml \
+  run bash "$VSTORM" -n --batch-id=cmb046 --datasource=rhel9 --storage-class=lvms-nvme-sc \
+    --snapshot --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
     --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -131,7 +131,7 @@ setup_file() {
 # COMBO-47: -q + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: quiet mode + no-snapshot DataSource clone" {
-  run bash "$VMSPAWN" -q --batch-id=cmb047 --no-snapshot --vms=3 --namespaces=1
+  run bash "$VSTORM" -q --batch-id=cmb047 --datasource=rhel9 --no-snapshot --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Quiet mode: no YAML output ---
@@ -150,7 +150,7 @@ setup_file() {
 # COMBO-48: -q + --dv-url
 # ---------------------------------------------------------------
 @test "combo: quiet mode + dv-url URL import" {
-  run bash "$VMSPAWN" -q --batch-id=cmb048 \
+  run bash "$VSTORM" -q --batch-id=cmb048 \
     --dv-url=http://example.com/disk.qcow2 --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -170,7 +170,7 @@ setup_file() {
 # COMBO-49: -q + --delete
 # ---------------------------------------------------------------
 @test "combo: quiet mode + delete" {
-  run bash "$VMSPAWN" -q --delete=abc123
+  run bash "$VSTORM" -q --delete=abc123
   [ "$status" -eq 0 ]
 
   # --- Delete dry-run still shows info ---

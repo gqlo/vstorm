@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -20,7 +20,7 @@ setup_file() {
 #   a containerDisk volume, no DataVolume or VolumeSnapshot
 # ---------------------------------------------------------------
 @test "cdisk: default image produces containerDisk VM, no DV or snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cdk001 --containerdisk --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=cdk001 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- correct disk source shown ---
@@ -46,7 +46,7 @@ setup_file() {
 # CDISK-2: --containerdisk=IMAGE uses the specified image
 # ---------------------------------------------------------------
 @test "cdisk: custom image URL is used in VM spec" {
-  run bash "$VMSPAWN" -n --batch-id=cdk002 \
+  run bash "$VSTORM" -n --batch-id=cdk002 \
     --containerdisk=quay.io/containerdisks/centos-stream9:latest \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -59,7 +59,7 @@ setup_file() {
 # CDISK-3: VM basename is auto-derived from the image name
 # ---------------------------------------------------------------
 @test "cdisk: basename auto-derived from image name" {
-  run bash "$VMSPAWN" -n --batch-id=cdk003 --containerdisk --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=cdk003 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # basename "fedora" derived from quay.io/containerdisks/fedora:latest
@@ -71,7 +71,7 @@ setup_file() {
 # CDISK-4: --basename overrides auto-derived name
 # ---------------------------------------------------------------
 @test "cdisk: explicit --basename overrides auto-derived image name" {
-  run bash "$VMSPAWN" -n --batch-id=cdk004 --containerdisk --basename=myvm \
+  run bash "$VSTORM" -n --batch-id=cdk004 --containerdisk --basename=myvm \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -83,7 +83,7 @@ setup_file() {
 # CDISK-5: default cloud-init is auto-applied (SSH access)
 # ---------------------------------------------------------------
 @test "cdisk: default cloud-init is auto-applied" {
-  run bash "$VMSPAWN" -n --batch-id=cdk005 --containerdisk --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=cdk005 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"applying default cloud-init"* ]]
@@ -96,7 +96,7 @@ setup_file() {
 # CDISK-6: multiple VMs across multiple namespaces
 # ---------------------------------------------------------------
 @test "cdisk: multiple VMs across multiple namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=cdk006 --containerdisk --vms=4 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=cdk006 --containerdisk --vms=4 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- two namespaces created ---
@@ -119,7 +119,7 @@ setup_file() {
 # CDISK-7: --containerdisk + --cores + --memory are applied
 # ---------------------------------------------------------------
 @test "cdisk: custom cores and memory applied to VM" {
-  run bash "$VMSPAWN" -n --batch-id=cdk007 --containerdisk \
+  run bash "$VSTORM" -n --batch-id=cdk007 --containerdisk \
     --cores=4 --memory=8Gi --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -131,7 +131,7 @@ setup_file() {
 # CDISK-8 (ERR): --containerdisk + --datasource is rejected
 # ---------------------------------------------------------------
 @test "ERR: --containerdisk + --datasource is rejected" {
-  run bash "$VMSPAWN" -n --batch-id=cdk008 \
+  run bash "$VSTORM" -n --batch-id=cdk008 \
     --containerdisk --datasource=rhel9 --vms=1 --namespaces=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"--containerdisk cannot be combined with --datasource or --dv-url"* ]]
@@ -141,7 +141,7 @@ setup_file() {
 # CDISK-9 (ERR): --containerdisk + --dv-url is rejected
 # ---------------------------------------------------------------
 @test "ERR: --containerdisk + --dv-url is rejected" {
-  run bash "$VMSPAWN" -n --batch-id=cdk009 \
+  run bash "$VSTORM" -n --batch-id=cdk009 \
     --containerdisk --dv-url=http://example.com/disk.qcow2 \
     --vms=1 --namespaces=1
   [ "$status" -ne 0 ]

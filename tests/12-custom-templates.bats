@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # CT-1: --custom-templates with a directory uses templates from it
 # ---------------------------------------------------------------
 @test "CT: custom templates directory used for VM creation" {
-  run bash "$VMSPAWN" -n --custom-templates=templates --batch-id=ct0001 \
+  run bash "$VSTORM" -n --custom-templates=templates --batch-id=ct0001 \
     --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: Namespace"* ]]
@@ -42,7 +42,7 @@ setup_file() {
   local tmpdir
   tmpdir=$(mktemp -d)
   cp templates/vm-containerdisk.yaml "$tmpdir/my-custom-vm.yaml"
-  run bash "$VMSPAWN" -n --custom-templates="$tmpdir/my-custom-vm.yaml" \
+  run bash "$VSTORM" -n --custom-templates="$tmpdir/my-custom-vm.yaml" \
     --batch-id=ct0002 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: VirtualMachine"* ]]
@@ -61,7 +61,7 @@ setup_file() {
   local tmpdir
   tmpdir=$(mktemp -d)
   cp templates/vm-datasource.yaml "$tmpdir/my-vm.yaml"
-  run bash "$VMSPAWN" -n \
+  run bash "$VSTORM" -n \
     --custom-templates="$tmpdir/my-vm.yaml:templates" \
     --batch-id=ct0003 --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -82,7 +82,7 @@ setup_file() {
   tmpdir=$(mktemp -d)
   cp templates/namespace.yaml "$tmpdir/my-ns.yaml"
   cp templates/vm-datasource.yaml "$tmpdir/fedora-vm.yaml"
-  run bash "$VMSPAWN" -n --custom-templates="$tmpdir" \
+  run bash "$VSTORM" -n --custom-templates="$tmpdir" \
     --batch-id=ct0004 --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: Namespace"* ]]
@@ -102,7 +102,7 @@ setup_file() {
 # CT-5: built-in templates/ directory works with content detection
 # ---------------------------------------------------------------
 @test "CT: built-in templates detected by content" {
-  run bash "$VMSPAWN" -n --batch-id=ct0005 --vms=3 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=ct0005 --datasource=rhel9 --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: Namespace"* ]]
   [[ "$output" == *"kind: DataVolume"* ]]
@@ -125,7 +125,7 @@ setup_file() {
   local tmpdir
   tmpdir=$(mktemp -d)
   cp templates/vm-snap.yaml "$tmpdir/custom-vm.yaml"
-  run bash "$VMSPAWN" -n --custom-templates="$tmpdir" \
+  run bash "$VSTORM" -n --custom-templates="$tmpdir" \
     --batch-id=ct0006 --vms=2 --namespaces=1 --snapshot
   [ "$status" -eq 0 ]
 
@@ -148,7 +148,7 @@ setup_file() {
   local tmpdir
   tmpdir=$(mktemp -d)
   echo "not-a-yaml-template" > "$tmpdir/junk.yaml"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n \
     --batch-id=ct0007 --containerdisk --vms=1 --namespaces=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"No namespace template found"* ]]
@@ -165,7 +165,7 @@ setup_file() {
   cp templates/vm-snap.yaml "$tmpdir/"
   cp templates/dv-datasource.yaml "$tmpdir/"
   # No volumesnap.yaml -- should fail
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=ct0008 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=ct0008 \
     --vms=1 --namespaces=1 --snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No volumesnapshot template found"* ]]
@@ -176,7 +176,7 @@ setup_file() {
 # CT-9: nonexistent path silently skipped, built-in used as fallback
 # ---------------------------------------------------------------
 @test "CT: nonexistent custom-templates path falls back to built-in" {
-  run bash "$VMSPAWN" -n \
+  run bash "$VSTORM" -n \
     --custom-templates="/nonexistent/file.yaml" \
     --batch-id=ct0009 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -202,7 +202,7 @@ metadata:
   labels:
     batch-id: "literal1"
 TMPL
-  run bash "$VMSPAWN" -n --custom-templates="$tmpdir" \
+  run bash "$VSTORM" -n --custom-templates="$tmpdir" \
     --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *'batch-id: "literal1"'* ]]
@@ -223,7 +223,7 @@ metadata:
   labels:
     batch-id: "literal2"
 TMPL
-  run bash "$VMSPAWN" -n --custom-templates="$tmpdir" \
+  run bash "$VSTORM" -n --custom-templates="$tmpdir" \
     --batch-id=xyz999 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
   [[ "$output" == *'batch-id: "xyz999"'* ]]
@@ -243,7 +243,7 @@ TMPL
   tmpdir=$(mktemp -d)
   cp templates/namespace.yaml "$tmpdir/"
   cp templates/vm-containerdisk.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="/nonexistent/path" bash "$VMSPAWN" -n \
+  run env CREATE_VM_PATH="/nonexistent/path" bash "$VSTORM" -n \
     --custom-templates="$tmpdir" \
     --batch-id=ct0012 --containerdisk --vms=1 --namespaces=1
   [ "$status" -eq 0 ]

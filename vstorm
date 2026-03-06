@@ -15,9 +15,9 @@ for _fd in 3 4 5 6 7 8 9; do
 done
 
 # Configuration variables - modify these as needed
-DATASOURCE="rhel9"
+DATASOURCE=
 DATASOURCE_NS="openshift-virtualization-os-images"
-DV_URL=
+DV_URL="http://d21-h25-000-r650.rdu2.scalelab.redhat.com:8088/rhel9-cloud-init.qcow"
 STORAGE_SIZE="32Gi"
 STORAGE_CLASS="ocs-storagecluster-ceph-rbd-virtualization"
 ACCESS_MODE="ReadWriteMany"
@@ -41,6 +41,7 @@ CUSTOM_TEMPLATES_SET=0
 VM_CPU_REQUEST=
 VM_MEMORY_REQUEST=
 CLOUDINIT_FILE=
+GUEST_ENV_ARR=()
 # Generate a random 6-character hex batch ID (16.7M unique values)
 if [[ -z "$(type -t xxd)" ]] ; then
     echo "Error: xxd command is not installed (needed to generate batch IDs)"
@@ -100,9 +101,8 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
         -n                      Show what commands would be run
                                 without running them
         -q                      Only list objects to be created
-        --datasource=NAME       Clone from OCP DataSource (default: $DATASOURCE)
-                                Overridden by --dv-url for custom images
-        --dv-url=URL            Import disk from URL instead of DataSource
+        --datasource=NAME       Clone from OCP DataSource (overrides default URL)
+        --dv-url=URL            Import disk from URL (default: $DV_URL)
         --storage-size=N        Storage size ($STORAGE_SIZE)
         --storage-class=class   Storage class ($STORAGE_CLASS)
                                 | | | (auto-disables snapshots unless
@@ -141,7 +141,8 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
                                 | | | Default image:
                                 | | | quay.io/containerdisks/fedora:latest
         --cloudinit=FILE        Inject cloud-init user-data from FILE
-                                into each VM (e.g. helpers/cloudinit-stress-workload.yaml)
+                                into each VM (e.g. workload/cloudinit-stress-ng-workload.yaml)
+        --env KEY=VAL           Set env in guest (repeatable; written to /etc/default/vstorm-guest-env)
         --custom-templates=PATH Use YAML templates from PATH (file or
                                 | | | directory; colon-separated for
                                 | | | multiple paths). Falls back to
@@ -206,6 +207,7 @@ process_option() {
 	wait)	   WAIT=1 ;;
 	nowait)	   WAIT=0 ;;
 	cloudinit) CLOUDINIT_FILE=$value ;;
+	env)       GUEST_ENV_ARR+=("$value") ;;
 	containerdisk) CONTAINERDISK_IMAGE=${value:-quay.io/containerdisks/fedora:latest}
 		   DATASOURCE=; DV_URL= ;;
 	createex*) RECREATE_EXISTING_VMS=1 ;;
@@ -216,6 +218,22 @@ process_option() {
 	*) 	   fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
     esac
 }
+
+# Normalize --env VAL to --env=VAL so getopts receives a value (space-separated form)
+_argv=()
+for ((_i=1; _i<=$#; _i++)); do
+    _arg="${@:_i:1}"
+    if [[ "$_arg" == --env && _i -lt $# ]]; then
+	_next="${@:_i+1:1}"
+	if [[ "$_next" != --* ]]; then
+	    _argv+=("--env=$_next")
+	    ((_i++))
+	    continue
+	fi
+    fi
+    _argv+=("$_arg")
+done
+set -- "${_argv[@]}"
 
 # process all the options one by one, - is treated as the option"-"
 # Leading : suppresses getopts default error so we can show our own message.
@@ -925,7 +943,7 @@ check_datavolume_status() {
                 sleep 10
                 ;;
             *)
-                log_message "DataVolume ${C_VAL}$datavolume_name${C_RST} in namespace ${C_VAL}$namespace${C_RST} has unknown status: ${C_WARN}$status${C_RST}"
+                log_message "DataVolume ${C_VAL}$datavolume_name${C_RST} in namespace ${C_VAL}$namespace${C_RST} status: ${C_WARN}$status${C_RST}"
                 sleep 10
                 ;;
         esac
@@ -1089,7 +1107,29 @@ $(local resource; for resource in "${!requests[@]}" ; do echo "    $resource: ${
     local cloudinit_b64=""
     local cloudinit_secret_file=""
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
-	cloudinit_b64=$(base64 -w0 "$CLOUDINIT_FILE")
+	cloudinit_content=$(cat "$CLOUDINIT_FILE")
+	_guest_env_branch=false
+	if [[ "$cloudinit_content" == *"{VSTORM_GUEST_ENV}"* ]]; then
+	    _guest_env_branch=true
+	    # Replace entire line containing placeholder so indentation is uniform (6 spaces per line).
+	    # Use bash while-read to avoid awk multi-line replacement duplicating or corrupting lines.
+	    if [[ "${#GUEST_ENV_ARR[@]}" -gt 0 ]]; then
+		GUEST_ENV_LINES=$(printf '%s\n' "${GUEST_ENV_ARR[@]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^/      /')
+	    else
+		GUEST_ENV_LINES="      # no --env passed"
+	    fi
+	    _ci_tmp=$(cat "$CLOUDINIT_FILE")
+	    cloudinit_content=""
+	    while IFS= read -r line || [[ -n "$line" ]]; do
+		if [[ "$line" =~ ^[[:space:]]*\{VSTORM_GUEST_ENV\}[[:space:]]*$ ]]; then
+		    cloudinit_content+="$GUEST_ENV_LINES"$'\n'
+		else
+		    cloudinit_content+="$line"$'\n'
+		fi
+	    done <<< "$_ci_tmp"
+	    cloudinit_content="${cloudinit_content%$'\n'}"
+	fi
+	cloudinit_b64=$(printf '%s' "$cloudinit_content" | base64 -w0)
 	cloudinit_secret_file="${TEMPLATE_CACHE[cloudinit-secret]:-}"
 	if [[ -z "$cloudinit_secret_file" ]]; then
 	    cloudinit_secret_file=$(find_template_by_content cloudinit-secret "userdata:")
@@ -1522,9 +1562,6 @@ profiler_prompt_and_stop() {
 	"$PROFILER_BIN" --cmd dump --output-dir "$output_dir" ||
 	    fatal "Failed to dump profiling results"
     else
-	# region agent log
-	echo "{\"id\":\"log_dump_cmd\",\"timestamp\":$(date +%s%3N),\"location\":\"vstorm:1266\",\"message\":\"profiler dump command\",\"data\":{\"target\":\"$PROFILE_TARGET\",\"cmd\":\"$PROFILER_BIN --cmd dump --l kubevirt.io=$PROFILE_TARGET --output-dir $output_dir\"},\"hypothesisId\":\"A\"}" >> /home/guoqingli/work/vstorm/.cursor/debug.log
-	# endregion
 	"$PROFILER_BIN" --cmd dump --l "kubevirt.io=$PROFILE_TARGET" --output-dir "$output_dir" ||
 	    fatal "Failed to dump profiling results for $PROFILE_TARGET"
     fi

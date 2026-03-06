@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# log-vm - Show cloud-init and systemd unit logs on a VM via virtctl ssh (or open interactive SSH with -s)
+#
+# Usage: log-vm [ -s ] [ -u UNIT ] [ -n LINES ] <vm-name> <namespace> [lines]
+#   Without -s: shows cloud-init status, cloud-init-output.log tail, unit journal, and ps -efH | grep stress-ng.
+#   With -s: opens an interactive SSH session to the VM (no logs).
+#   Default unit: stress-workload.service. Default lines: 20 (for both tail and journal).
+#   Password must be set via STRESS_WORKLOAD_PASSWORD (same as root password in your workload cloud-init).
+#
+# Requires: virtctl, sshpass, STRESS_WORKLOAD_PASSWORD
+
+set -eu
+
+fatal() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [ -s ] [ -u UNIT ] [ -n LINES ] <vm-name> <namespace> [lines]
+
+Show cloud-init and systemd unit logs on a VM (both in one run), or open interactive SSH with -s.
+
+Options:
+    -s, --ssh    SSH into the VM only (no logs; interactive shell)
+    -u UNIT      Systemd unit name (default: stress-workload.service)
+    -n LINES     Number of lines for tail and journal (default: 20)
+
+Without -s, shows:
+  - cloud-init status --long
+  - tail of /var/log/cloud-init-output.log
+  - journalctl -u UNIT -n lines
+  - ps -efH | grep stress-ng
+
+Arguments:
+    vm-name      Name of the virtual machine
+    namespace    Kubernetes namespace
+    lines        Same as -n (e.g. 50 or -n 50)
+
+Password (required): STRESS_WORKLOAD_PASSWORD=<value>
+EOF
+    exit "${1:-0}"
+}
+
+UNIT="stress-workload.service"
+LINES=""
+SSH_ONLY=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--ssh)
+            SSH_ONLY=true
+            shift
+            ;;
+        -u)
+            [[ -n "${2:-}" ]] || usage 1
+            UNIT=$2
+            shift 2
+            ;;
+        -n)
+            [[ -n "${2:-}" ]] || usage 1
+            LINES=$2
+            shift 2
+            ;;
+        -h|--help)
+            usage 0
+            ;;
+        -*)
+            usage 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [[ -z "${1:-}" ]] || [[ -z "${2:-}" ]]; then
+    usage 1
+fi
+
+VM=$1
+NS=$2
+if [[ -z "$LINES" ]]; then
+    if [[ "${3:-}" == "-n" ]] && [[ -n "${4:-}" ]]; then
+        LINES=$4
+    else
+        LINES=${3:-50}
+    fi
+fi
+if [[ -z "${STRESS_WORKLOAD_PASSWORD:-}" ]]; then
+    fatal "STRESS_WORKLOAD_PASSWORD is not set. Set it to the VM root password (e.g. the one in your workload cloud-init)."
+fi
+PASSWORD="$STRESS_WORKLOAD_PASSWORD"
+
+if [[ -z "$(type -t virtctl)" ]]; then
+    fatal "virtctl command is not installed (see helpers/install-virtctl)"
+fi
+
+if [[ -z "$(type -t sshpass)" ]]; then
+    fatal "sshpass is required (e.g. dnf install sshpass)"
+fi
+
+if $SSH_ONLY; then
+    exec sshpass -p "$PASSWORD" virtctl ssh -n "$NS" \
+        --local-ssh-opts="-o StrictHostKeyChecking=no" \
+        --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
+        --local-ssh-opts="-o ConnectTimeout=10" \
+        root@vmi/"$VM"
+else
+    sshpass -p "$PASSWORD" virtctl ssh -n "$NS" \
+        --local-ssh-opts="-o StrictHostKeyChecking=no" \
+        --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
+        --local-ssh-opts="-o ConnectTimeout=10" \
+        root@vmi/"$VM" --command "\
+        echo '=== cloud-init status ==='; cloud-init status --long; echo ''; \
+        echo '=== cloud-init-output.log (tail -n $LINES) ==='; tail -n $LINES /var/log/cloud-init-output.log; echo ''; \
+        echo '=== $UNIT journal (last $LINES) ==='; journalctl -u $UNIT -n $LINES --no-pager; echo ''; \
+        echo '=== ps -efH | grep stress-ng ==='; ps -efH | grep stress-ng || true"
+fi

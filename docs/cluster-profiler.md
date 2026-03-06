@@ -21,7 +21,7 @@ helping identify performance bottlenecks caused by batch VM operations.
 ./vstorm --profile=virt-controller --vms=20 --namespaces=4
 
 # Combine with other options as usual
-./vstorm --profile --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=50 --namespaces=10
+./vstorm --profile --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=50 --namespaces=10
 
 # Dry-run to see what would happen
 ./vstorm -n --profile --vms=10

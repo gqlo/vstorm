@@ -1,5 +1,0 @@
-{"sessionId":"f71089","hypothesisId":"H2","location":"oc get deployment","message":"Deployment volumes","data":{"volumes":["sc-grafana-config","sc-ocp-prom"],"my_dashboard_mounted":false,"evidence":"No volume for my-dashboard or grafana_dashboard label"}}
-{"sessionId":"f71089","hypothesisId":"H4","location":"oc exec find /etc/grafana","message":"Provisioning paths in container","data":{"provisioning_dirs":["datasources"],"dashboards_dir_exists":false,"evidence":"Only provisioning/datasources exists; no dashboards path"}}
-{"sessionId":"f71089","hypothesisId":"H3","location":"configmap my-dashboard","message":"ConfigMap key name","data":{"key":"descheduler_cnv.json","valid_for_grafana":true}}
-{"sessionId":"f71089","verdict":"H2 CONFIRMED, H4 CONFIRMED. Fix: add dashboard volume + provider config"}
-{"sessionId":"f71089","runId":"post-fix","hypothesisId":"verify","location":"oc exec ls","message":"Post-fix provisioning paths","data":{"dashboards_yaml_exists":true,"default_descheduler_cnv_json_exists":true,"evidence":"dashboards.yaml and default/descheduler_cnv.json present in new pod"}}

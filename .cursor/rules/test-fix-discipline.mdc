@@ -1,0 +1,14 @@
+---
+description: When tests fail, fix code logic first; do not change tests just to make them pass
+alwaysApply: true
+---
+
+# Test Fix Discipline
+
+When a test fails:
+
+1. **Check the code logic first** – Understand what the production code (or script) is supposed to do and whether the failure indicates a real bug or wrong behavior.
+2. **Analyze the tests** – Only after understanding the code, decide whether the test is wrong (e.g. outdated expectation, bad assertion) or correctly catching a bug.
+3. **Do not change tests solely to make them pass** – Avoid relaxing assertions, removing checks, or rewriting expectations just to get green. If the test was correct, fix the code; if the test was wrong, fix the test with a clear justification.
+
+Apply this order: code logic → test analysis → fix the right thing.

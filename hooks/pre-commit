@@ -19,9 +19,9 @@ md_files=()
 
 while IFS= read -r f ; do
     case "$f" in
-        vstorm|templates/*|helpers/*|tests/*.bats|tests/helpers.bash)
+        vstorm|templates/*|helpers/*|workload/*|tests/*.bats|tests/helpers.bash)
             run_tests=1 ;;
-        helpers/*.yaml)
+        helpers/*.yaml|workload/*.yaml)
             yaml_files+=("$f") ;;
         *.md)
             md_files+=("$f") ;;

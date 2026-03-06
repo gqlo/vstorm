@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # Batch ID auto-generation
 # ---------------------------------------------------------------
 @test "auto-generates a 6-character hex batch ID" {
-  run bash "$VMSPAWN" -q --vms=1 --namespaces=1
+  run bash "$VSTORM" -q --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   local batch_id
@@ -31,7 +31,7 @@ setup_file() {
 # Namespace naming
 # ---------------------------------------------------------------
 @test "namespaces follow vm-{batch}-ns-{N} pattern" {
-  run bash "$VMSPAWN" -q --batch-id=ff0011 --vms=4 --namespaces=3
+  run bash "$VSTORM" -q --batch-id=ff0011 --vms=4 --namespaces=3
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"vm-ff0011-ns-1"* ]]
@@ -44,7 +44,7 @@ setup_file() {
 # VM distribution
 # ---------------------------------------------------------------
 @test "VMs are distributed evenly with remainder in first namespaces" {
-  run bash "$VMSPAWN" -q --batch-id=aabb11 --vms=5 --namespaces=2
+  run bash "$VSTORM" -q --batch-id=aabb11 --vms=5 --namespaces=2
   [ "$status" -eq 0 ]
 
   local ns1_count ns2_count
@@ -60,27 +60,27 @@ setup_file() {
 # ===============================================================
 
 @test "--delete without a value fails with helpful error" {
-  run bash "$VMSPAWN" -n --delete
+  run bash "$VSTORM" -n --delete
   [ "$status" -ne 0 ]
   [[ "$output" == *"--delete requires a batch ID"* ]]
 }
 
 @test "non-numeric first positional argument is rejected" {
-  run bash "$VMSPAWN" -n abc123
+  run bash "$VSTORM" -n abc123
   [ "$status" -ne 0 ]
   [[ "$output" == *"Invalid argument"* ]]
   [[ "$output" == *"expected a number for total VMs"* ]]
 }
 
 @test "non-numeric second positional argument is rejected" {
-  run bash "$VMSPAWN" -n 5 abc
+  run bash "$VSTORM" -n 5 abc
   [ "$status" -ne 0 ]
   [[ "$output" == *"Invalid argument"* ]]
   [[ "$output" == *"expected a number for namespaces"* ]]
 }
 
 @test "--cloudinit with missing file fails" {
-  run bash "$VMSPAWN" -n --batch-id=err001 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err001 --vms=1 --namespaces=1 \
     --cloudinit=nonexistent-file.yaml
   [ "$status" -ne 0 ]
   [[ "$output" == *"Cloud-init file not found"* ]]
@@ -88,7 +88,7 @@ setup_file() {
 
 @test "--dv-url with empty DATASOURCE requires URL" {
   # --dv-url clears DATASOURCE; omitting URL value should fail
-  run bash "$VMSPAWN" -n --batch-id=err002 --vms=1 --namespaces=1 --dv-url=
+  run bash "$VSTORM" -n --batch-id=err002 --vms=1 --namespaces=1 --dv-url=
   [ "$status" -ne 0 ]
 }
 
@@ -96,7 +96,7 @@ setup_file() {
 # ERR-1: --vms=0 rejected as non-positive
 # ---------------------------------------------------------------
 @test "ERR: --vms=0 rejected as non-positive" {
-  run bash "$VMSPAWN" -n --batch-id=err010 --vms=0 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=err010 --vms=0 --namespaces=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of VMs must be a positive integer"* ]]
 }
@@ -105,7 +105,7 @@ setup_file() {
 # ERR-2: --namespaces=0 rejected as non-positive
 # ---------------------------------------------------------------
 @test "ERR: --namespaces=0 rejected as non-positive" {
-  run bash "$VMSPAWN" -n --batch-id=err011 --vms=1 --namespaces=0
+  run bash "$VSTORM" -n --batch-id=err011 --vms=1 --namespaces=0
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of namespaces must be a positive integer"* ]]
 }
@@ -114,7 +114,7 @@ setup_file() {
 # ERR-3: VMs fewer than namespaces is rejected
 # ---------------------------------------------------------------
 @test "ERR: --vms=2 --namespaces=5 fails (VMs < namespaces)" {
-  run bash "$VMSPAWN" -n --batch-id=err012 --vms=2 --namespaces=5
+  run bash "$VSTORM" -n --batch-id=err012 --vms=2 --namespaces=5
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of VMs must be greater than or equal to number of namespaces"* ]]
 }
@@ -123,7 +123,7 @@ setup_file() {
 # ERR-4: too many positional arguments rejected with diagnostic
 # ---------------------------------------------------------------
 @test "ERR: three positional arguments rejected with count" {
-  run bash "$VMSPAWN" -n --batch-id=err013 10 2 3
+  run bash "$VSTORM" -n --batch-id=err013 10 2 3
   [ "$status" -ne 0 ]
   [[ "$output" == *"too many positional arguments"* ]]
   [[ "$output" == *"got 3"* ]]
@@ -133,7 +133,7 @@ setup_file() {
 # ERR-5: negative number as positional arg rejected
 # ---------------------------------------------------------------
 @test "ERR: negative positional arg rejected as non-numeric" {
-  run bash "$VMSPAWN" -n --batch-id=err014 -- -5
+  run bash "$VSTORM" -n --batch-id=err014 -- -5
   [ "$status" -ne 0 ]
   [[ "$output" == *"Invalid argument"* ]]
 }
@@ -142,7 +142,7 @@ setup_file() {
 # ERR-6: unknown long option shows error with option name
 # ---------------------------------------------------------------
 @test "ERR: unknown long option rejected with name" {
-  run bash "$VMSPAWN" -n --batch-id=err015 --nonexistent-option
+  run bash "$VSTORM" -n --batch-id=err015 --nonexistent-option
   [ "$status" -ne 0 ]
   [[ "$output" == *"unrecognized option"* ]]
   [[ "$output" == *"--nonexistent-option"* ]]
@@ -153,7 +153,7 @@ setup_file() {
 # ERR-7: unknown short option shows error with option name
 # ---------------------------------------------------------------
 @test "ERR: unknown short option rejected with name" {
-  run bash "$VMSPAWN" -nZ
+  run bash "$VSTORM" -nZ
   [ "$status" -ne 0 ]
   [[ "$output" == *"unrecognized option"* ]]
   [[ "$output" == *"-Z"* ]]
@@ -164,7 +164,7 @@ setup_file() {
 # ERR-8: --delete= with empty string fails
 # ---------------------------------------------------------------
 @test "ERR: --delete with empty value fails" {
-  run bash "$VMSPAWN" -n "--delete="
+  run bash "$VSTORM" -n "--delete="
   [ "$status" -ne 0 ]
   [[ "$output" == *"--delete requires a batch ID"* ]]
 }
@@ -173,7 +173,7 @@ setup_file() {
 # ERR-9: --cloudinit pointing to a directory instead of a file
 # ---------------------------------------------------------------
 @test "ERR: --cloudinit with directory instead of file fails" {
-  run bash "$VMSPAWN" -n --batch-id=err016 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err016 --vms=1 --namespaces=1 \
     --cloudinit=/tmp
   [ "$status" -ne 0 ]
   [[ "$output" == *"Cloud-init file not found"* ]]
@@ -185,7 +185,7 @@ setup_file() {
 @test "ERR: missing namespace template fails" {
   local tmpdir
   tmpdir=$(mktemp -d)
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err017 --vms=1 --namespaces=1
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err017 --vms=1 --namespaces=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"No namespace template found"* ]]
   rm -rf "$tmpdir"
@@ -200,7 +200,7 @@ setup_file() {
   cp templates/namespace.yaml "$tmpdir/"
   cp templates/volumesnap.yaml "$tmpdir/"
   cp templates/vm-snap.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err018 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err018 \
     --vms=1 --namespaces=1 --snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No dv template found"* ]]
@@ -215,7 +215,7 @@ setup_file() {
   tmpdir=$(mktemp -d)
   cp templates/namespace.yaml "$tmpdir/"
   cp templates/vm-clone.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err019 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err019 \
     --vms=1 --namespaces=1 --dv-url=http://example.com/disk.qcow2 --no-snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No dv template found"* ]]
@@ -231,7 +231,7 @@ setup_file() {
   cp templates/namespace.yaml "$tmpdir/"
   cp templates/volumesnap.yaml "$tmpdir/"
   cp templates/dv-datasource.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err020 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err020 \
     --vms=1 --namespaces=1 --snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No vm template found"* ]]
@@ -245,7 +245,7 @@ setup_file() {
   local tmpdir
   tmpdir=$(mktemp -d)
   cp templates/namespace.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err021 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err021 \
     --vms=1 --namespaces=1 --no-snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No vm template found"* ]]
@@ -260,7 +260,7 @@ setup_file() {
   tmpdir=$(mktemp -d)
   cp templates/namespace.yaml "$tmpdir/"
   cp templates/dv.yaml "$tmpdir/"
-  run env CREATE_VM_PATH="$tmpdir" bash "$VMSPAWN" -n --batch-id=err022 \
+  run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err022 \
     --vms=1 --namespaces=1 --dv-url=http://example.com/disk.qcow2 --no-snapshot
   [ "$status" -ne 0 ]
   [[ "$output" == *"No vm template found"* ]]
@@ -271,7 +271,7 @@ setup_file() {
 # ERR-16: --snapshot then --no-snapshot (last wins = no-snapshot)
 # ---------------------------------------------------------------
 @test "ERR: --snapshot then --no-snapshot uses no-snapshot mode" {
-  run bash "$VMSPAWN" -n --batch-id=err023 --vms=2 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err023 --vms=2 --namespaces=1 \
     --snapshot --no-snapshot
   [ "$status" -eq 0 ]
   [[ "$output" != *"Creating VolumeSnapshots"* ]]
@@ -282,7 +282,7 @@ setup_file() {
 # ERR-17: --no-snapshot then --snapshot (last wins = snapshot)
 # ---------------------------------------------------------------
 @test "ERR: --no-snapshot then --snapshot uses snapshot mode" {
-  run bash "$VMSPAWN" -n --batch-id=err024 --vms=2 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err024 --vms=2 --namespaces=1 \
     --no-snapshot --snapshot
   [ "$status" -eq 0 ]
   [[ "$output" == *"Creating VolumeSnapshots"* ]]
@@ -293,7 +293,7 @@ setup_file() {
 # ERR-18: --rwo then --rwx (last wins = ReadWriteMany)
 # ---------------------------------------------------------------
 @test "ERR: --rwo then --rwx uses ReadWriteMany" {
-  run bash "$VMSPAWN" -n --batch-id=err025 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err025 --vms=1 --namespaces=1 \
     --rwo --rwx
   [ "$status" -eq 0 ]
   [[ "$output" == *"ReadWriteMany"* ]]
@@ -304,7 +304,7 @@ setup_file() {
 # ERR-19: --rwx then --rwo (last wins = ReadWriteOnce)
 # ---------------------------------------------------------------
 @test "ERR: --rwx then --rwo uses ReadWriteOnce" {
-  run bash "$VMSPAWN" -n --batch-id=err026 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err026 --vms=1 --namespaces=1 \
     --rwx --rwo
   [ "$status" -eq 0 ]
   [[ "$output" == *"ReadWriteOnce"* ]]
@@ -314,7 +314,7 @@ setup_file() {
 # ERR-20: --dv-url overrides --datasource
 # ---------------------------------------------------------------
 @test "ERR: --dv-url overrides --datasource" {
-  run bash "$VMSPAWN" -n --batch-id=err027 --vms=1 --namespaces=1 \
+  run bash "$VSTORM" -n --batch-id=err027 --vms=1 --namespaces=1 \
     --datasource=fedora --dv-url=http://example.com/disk.qcow2 --no-snapshot
   [ "$status" -eq 0 ]
   [[ "$output" == *"http://example.com/disk.qcow2"* ]]
@@ -326,7 +326,7 @@ setup_file() {
 # ERR-21: --vms=-1 rejected as non-positive
 # ---------------------------------------------------------------
 @test "ERR: --vms=-1 rejected as non-positive" {
-  run bash "$VMSPAWN" -n --batch-id=err028 --vms=-1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=err028 --vms=-1 --namespaces=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of VMs must be a positive integer"* ]]
 }
@@ -335,7 +335,7 @@ setup_file() {
 # ERR-22: --namespaces=-1 rejected as non-positive
 # ---------------------------------------------------------------
 @test "ERR: --namespaces=-1 rejected as non-positive" {
-  run bash "$VMSPAWN" -n --batch-id=err029 --namespaces=-1 --vms=1
+  run bash "$VSTORM" -n --batch-id=err029 --namespaces=-1 --vms=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of namespaces must be a positive integer"* ]]
 }
@@ -344,7 +344,7 @@ setup_file() {
 # ERR-23: option placed after positional arg is detected
 # ---------------------------------------------------------------
 @test "ERR: option after positional arg detected" {
-  run bash "$VMSPAWN" -n 10 --cores=4
+  run bash "$VSTORM" -n 10 --cores=4
   [ "$status" -ne 0 ]
   [[ "$output" == *"Misplaced option '--cores=4'"* ]]
   [[ "$output" == *"before positional arguments"* ]]
@@ -354,7 +354,7 @@ setup_file() {
 # ERR-24: option sandwiched between valid option and positional
 # ---------------------------------------------------------------
 @test "ERR: trailing option after positional arg detected" {
-  run bash "$VMSPAWN" -n --cores=4 10 --memory=2Gi
+  run bash "$VSTORM" -n --cores=4 10 --memory=2Gi
   [ "$status" -ne 0 ]
   [[ "$output" == *"Misplaced option '--memory=2Gi'"* ]]
 }
@@ -363,7 +363,7 @@ setup_file() {
 # ERR-25: multiple misplaced options (first one is reported)
 # ---------------------------------------------------------------
 @test "ERR: first misplaced option is reported" {
-  run bash "$VMSPAWN" -n 10 --cores=4 --memory=2Gi
+  run bash "$VSTORM" -n 10 --cores=4 --memory=2Gi
   [ "$status" -ne 0 ]
   [[ "$output" == *"Misplaced option '--cores=4'"* ]]
 }
@@ -372,7 +372,7 @@ setup_file() {
 # ERR-26: misplaced --delete after positional arg
 # ---------------------------------------------------------------
 @test "ERR: misplaced --delete after positional arg detected" {
-  run bash "$VMSPAWN" -n 5 --delete=abc123
+  run bash "$VSTORM" -n 5 --delete=abc123
   [ "$status" -ne 0 ]
   [[ "$output" == *"Misplaced option '--delete=abc123'"* ]]
 }
@@ -381,7 +381,7 @@ setup_file() {
 # ERR-27: -- end-of-options marker still works (not a false positive)
 # ---------------------------------------------------------------
 @test "ERR: -- end-of-options does not trigger misplaced option check" {
-  run bash "$VMSPAWN" -n --batch-id=err030 --vms=1 --namespaces=1 -- 5
+  run bash "$VSTORM" -n --batch-id=err030 --vms=1 --namespaces=1 -- 5
   [ "$status" -eq 0 ]
 }
 
@@ -397,10 +397,82 @@ sleep 999
 SLOWMOCK
   chmod +x "$tmpdir/oc"
   run env PATH="$tmpdir:$PATH" OC_CONNECT_TIMEOUT=1 \
-    bash "$VMSPAWN" --batch-id=err031 --vms=1 --namespaces=1
+    bash "$VSTORM" --batch-id=err031 --vms=1 --namespaces=1
   rm -rf "$tmpdir"
   [ "$status" -ne 0 ]
   [[ "$output" == *"timed out reaching OpenShift cluster"* ]]
   [[ "$output" == *"check network connectivity"* ]]
+}
+
+# ===============================================================
+# Option coverage: --env (guest env injection)
+# ===============================================================
+
+# ---------------------------------------------------------------
+# OPT: --env documented in help
+# ---------------------------------------------------------------
+@test "OPT: --env documented in help" {
+  run bash "$VSTORM" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--env"* ]]
+  [[ "$output" == *"KEY=VAL"* ]]
+  [[ "$output" == *"vstorm-guest-env"* ]]
+}
+
+# ---------------------------------------------------------------
+# OPT: --env with cloud-init that has placeholder injects vars into Secret
+# ---------------------------------------------------------------
+@test "OPT: --env injects KEY=VAL into cloud-init Secret userdata" {
+  run bash "$VSTORM" -n --batch-id=env01 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --env FOO=bar --env=BAZ=qux
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kind: Secret"* ]]
+  [[ "$output" == *"userdata:"* ]]
+
+  userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+  [ -n "$userdata_b64" ]
+  decoded=$(echo "$userdata_b64" | base64 -d 2>/dev/null)
+  [[ "$decoded" == *"  FOO=bar"* ]]
+  [[ "$decoded" == *"  BAZ=qux"* ]]
+  [[ "$decoded" != *"{VSTORM_GUEST_ENV}"* ]]
+}
+
+# ---------------------------------------------------------------
+# OPT: --env space-separated form (--env KEY=VAL)
+# ---------------------------------------------------------------
+@test "OPT: --env space-separated form accepted" {
+  run bash "$VSTORM" -n --batch-id=env02 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --env X=1 --env Y=2
+  [ "$status" -eq 0 ]
+  userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+  decoded=$(echo "$userdata_b64" | base64 -d 2>/dev/null)
+  [[ "$decoded" == *"  X=1"* ]]
+  [[ "$decoded" == *"  Y=2"* ]]
+}
+
+# ---------------------------------------------------------------
+# OPT: --env without --cloudinit does not crash (default cloud-init has no placeholder)
+# ---------------------------------------------------------------
+@test "OPT: --env without custom cloud-init runs successfully" {
+  run bash "$VSTORM" -n --batch-id=env03 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --env EXTRA=value
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kind: Secret"* ]]
+}
+
+# ---------------------------------------------------------------
+# OPT: no --env replaces placeholder with comment in userdata when file has it
+# ---------------------------------------------------------------
+@test "OPT: no --env replaces placeholder with comment in cloud-init userdata when present in file" {
+  run bash "$VSTORM" -n --batch-id=env04 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+  [ "$status" -eq 0 ]
+  userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+  decoded=$(echo "$userdata_b64" | base64 -d 2>/dev/null)
+  # Placeholder is always replaced (with env lines or with comment) so YAML stays valid
+  [[ "$decoded" == *"# no --env passed"* ]]
+  [[ "$decoded" != *"{VSTORM_GUEST_ENV}"* ]]
 }
 

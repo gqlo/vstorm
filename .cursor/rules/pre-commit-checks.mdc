@@ -10,7 +10,7 @@ Before creating any `git commit`, always run the following checks and fix any fa
 ## Required Checks
 
 1. **Tests**: Run `bats tests/` and verify all tests pass
-2. **YAML lint**: Run `yamllint` on any changed YAML files in `helpers/` or `templates/`
+2. **YAML lint**: Run `yamllint` on any changed YAML files in `helpers/`, `workload/`, or `templates/`
 3. **Markdown lint**: Run `markdownlint-cli2` on any changed `.md` files
 
 ## Rules
@@ -27,7 +27,7 @@ Before creating any `git commit`, always run the following checks and fix any fa
 bats tests/
 
 # Lint YAML (check changed files)
-yamllint helpers/*.yaml
+yamllint helpers/*.yaml workload/*.yaml
 
 # Lint Markdown (check changed files)
 markdownlint-cli2 "**/*.md"

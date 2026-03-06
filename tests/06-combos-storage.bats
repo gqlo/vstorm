@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # COMBO-1: --storage-class + --rwo + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: storage-class + rwo + no-snapshot on DataSource clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb001 --storage-class=my-sc --rwo \
+  run bash "$VSTORM" -n --batch-id=cmb001 --datasource=rhel9 --storage-class=my-sc --rwo \
     --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -43,7 +43,7 @@ setup_file() {
 # COMBO-2: --storage-class + --snapshot-class + --rwo
 # ---------------------------------------------------------------
 @test "combo: storage-class + snapshot-class + rwo in snapshot path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb002 --storage-class=my-rbd \
+  run bash "$VSTORM" -n --batch-id=cmb002 --datasource=rhel9 --storage-class=my-rbd \
     --snapshot-class=my-snap --rwo --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -68,7 +68,7 @@ setup_file() {
 # COMBO-3: --storage-class + --rwo + --dv-url
 # ---------------------------------------------------------------
 @test "combo: storage-class + rwo + dv-url on URL import path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb003 --storage-class=my-sc --rwo \
+  run bash "$VSTORM" -n --batch-id=cmb003 --storage-class=my-sc --rwo \
     --dv-url=http://example.com/disk.qcow2 --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -89,7 +89,7 @@ setup_file() {
 # COMBO-4: --storage-class + --storage-size + --dv-url
 # ---------------------------------------------------------------
 @test "combo: storage-class + storage-size + dv-url" {
-  run bash "$VMSPAWN" -n --batch-id=cmb004 --storage-class=my-sc \
+  run bash "$VSTORM" -n --batch-id=cmb004 --storage-class=my-sc \
     --storage-size=50Gi --dv-url=http://example.com/disk.qcow2 \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -108,7 +108,7 @@ setup_file() {
 # COMBO-5: --storage-size + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: storage-size + no-snapshot on DataSource inline DV" {
-  run bash "$VMSPAWN" -n --batch-id=cmb005 --storage-size=50Gi \
+  run bash "$VSTORM" -n --batch-id=cmb005 --datasource=rhel9 --storage-size=50Gi \
     --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -127,7 +127,7 @@ setup_file() {
 # COMBO-6: --storage-size + --snapshot
 # ---------------------------------------------------------------
 @test "combo: storage-size + snapshot on base DV and snapshot flow" {
-  run bash "$VMSPAWN" -n --batch-id=cmb006 --storage-size=50Gi \
+  run bash "$VSTORM" -n --batch-id=cmb006 --datasource=rhel9 --storage-size=50Gi \
     --snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -144,7 +144,7 @@ setup_file() {
 # COMBO-7: --rwx + --dv-url + --snapshot
 # ---------------------------------------------------------------
 @test "combo: rwx + dv-url + snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb007 --rwx \
+  run bash "$VSTORM" -n --batch-id=cmb007 --datasource=rhel9 --rwx \
     --dv-url=http://example.com/disk.qcow2 --snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -163,7 +163,7 @@ setup_file() {
 # COMBO-8: --rwo + --storage-class + --no-snapshot + --storage-size
 # ---------------------------------------------------------------
 @test "combo: all storage options on DataSource clone path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb008 --rwo --storage-class=my-sc \
+  run bash "$VSTORM" -n --batch-id=cmb008 --datasource=rhel9 --rwo --storage-class=my-sc \
     --no-snapshot --storage-size=50Gi --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -182,7 +182,7 @@ setup_file() {
 # COMBO-9: --access-mode=ReadWriteOnce + --storage-class + --snapshot-class
 # ---------------------------------------------------------------
 @test "combo: long-form access-mode + storage-class + snapshot-class" {
-  run bash "$VMSPAWN" -n --batch-id=cmb009 --access-mode=ReadWriteOnce \
+  run bash "$VSTORM" -n --batch-id=cmb009 --datasource=rhel9 --access-mode=ReadWriteOnce \
     --storage-class=my-rbd --snapshot-class=my-snap --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -207,9 +207,9 @@ setup_file() {
 # COMBO-10: --dv-url + --snapshot + --cloudinit
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot + custom cloudinit" {
-  run bash "$VMSPAWN" -n --batch-id=cmb010 \
+  run bash "$VSTORM" -n --batch-id=cmb010 --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --snapshot \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=2 --namespaces=1
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- URL import ---
@@ -232,9 +232,9 @@ setup_file() {
 # COMBO-11: --dv-url + --no-snapshot + --cloudinit
 # ---------------------------------------------------------------
 @test "combo: dv-url + no-snapshot + custom cloudinit" {
-  run bash "$VMSPAWN" -n --batch-id=cmb011 \
+  run bash "$VSTORM" -n --batch-id=cmb011 --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=2 --namespaces=1
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- URL import with PVC clone ---
@@ -255,8 +255,8 @@ setup_file() {
 # COMBO-12: --no-snapshot + --cloudinit + --namespaces=3
 # ---------------------------------------------------------------
 @test "combo: no-snapshot + cloudinit + 3 namespaces (Secret per ns)" {
-  run bash "$VMSPAWN" -n --batch-id=cmb012 --no-snapshot \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml \
+  run bash "$VSTORM" -n --batch-id=cmb012 --datasource=rhel9 --no-snapshot \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
     --vms=6 --namespaces=3
   [ "$status" -eq 0 ]
 
@@ -279,7 +279,7 @@ setup_file() {
 # COMBO-13: --dv-url + --snapshot (no --cloudinit) → no auto cloud-init
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot without cloudinit has no auto cloud-init" {
-  run bash "$VMSPAWN" -n --batch-id=cmb013 \
+  run bash "$VSTORM" -n --batch-id=cmb013 --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -298,8 +298,8 @@ setup_file() {
 # COMBO-14: --no-snapshot + --basename=fedora + --cloudinit
 # ---------------------------------------------------------------
 @test "combo: no-snapshot + custom basename + cloudinit" {
-  run bash "$VMSPAWN" -n --batch-id=cmb014 --no-snapshot --basename=fedora \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=cmb014 --datasource=rhel9 --no-snapshot --basename=fedora \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Custom basename in Secret name ---
@@ -326,7 +326,7 @@ setup_file() {
 # COMBO-15: --request-cpu + --request-memory + --snapshot
 # ---------------------------------------------------------------
 @test "combo: request-cpu + request-memory in snapshot path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb015 --request-cpu=2 --request-memory=4Gi \
+  run bash "$VSTORM" -n --batch-id=cmb015 --datasource=rhel9 --request-cpu=2 --request-memory=4Gi \
     --snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -345,7 +345,7 @@ setup_file() {
 # COMBO-16: --request-cpu + --request-memory + --dv-url + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: request-cpu + request-memory in URL PVC clone path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb016 --request-cpu=2 --request-memory=4Gi \
+  run bash "$VSTORM" -n --batch-id=cmb016 --datasource=rhel9 --request-cpu=2 --request-memory=4Gi \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -364,7 +364,7 @@ setup_file() {
 # COMBO-17: --cores + --memory + --request-cpu + --request-memory (snapshot)
 # ---------------------------------------------------------------
 @test "combo: cores + memory + request-cpu + request-memory in snapshot path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb017 --cores=4 --memory=8Gi \
+  run bash "$VSTORM" -n --batch-id=cmb017 --datasource=rhel9 --cores=4 --memory=8Gi \
     --request-cpu=2 --request-memory=4Gi --snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -383,7 +383,7 @@ setup_file() {
 # COMBO-18: --cores + --memory + --request-cpu + --request-memory (no-snapshot)
 # ---------------------------------------------------------------
 @test "combo: cores + memory + request-cpu + request-memory in DataSource clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb018 --cores=4 --memory=8Gi \
+  run bash "$VSTORM" -n --batch-id=cmb018 --datasource=rhel9 --cores=4 --memory=8Gi \
     --request-cpu=2 --request-memory=4Gi --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -410,7 +410,7 @@ setup_file() {
 # COMBO-19: --stop + --snapshot
 # ---------------------------------------------------------------
 @test "combo: stop + snapshot sets Halted in snapshot path" {
-  run bash "$VMSPAWN" -n --batch-id=cmb019 --stop --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb019 --datasource=rhel9 --stop --snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -423,7 +423,7 @@ setup_file() {
 # COMBO-20: --stop + --dv-url + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: stop + dv-url + no-snapshot sets Halted in URL clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb020 --stop \
+  run bash "$VSTORM" -n --batch-id=cmb020 --datasource=rhel9 --stop \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -437,7 +437,7 @@ setup_file() {
 # COMBO-21: --start + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: start + no-snapshot sets Always in DataSource clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb021 --start --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb021 --datasource=rhel9 --start --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -450,7 +450,7 @@ setup_file() {
 # COMBO-22: --run-strategy=Manual + --snapshot
 # ---------------------------------------------------------------
 @test "combo: run-strategy Manual + snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb022 --run-strategy=Manual --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb022 --datasource=rhel9 --run-strategy=Manual --snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -463,7 +463,7 @@ setup_file() {
 # COMBO-23: --run-strategy=Manual + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: run-strategy Manual + no-snapshot DataSource clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb023 --run-strategy=Manual --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb023 --datasource=rhel9 --run-strategy=Manual --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -476,7 +476,7 @@ setup_file() {
 # COMBO-24: --run-strategy=Manual + --dv-url + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: run-strategy Manual + dv-url + no-snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb024 --run-strategy=Manual \
+  run bash "$VSTORM" -n --batch-id=cmb024 --datasource=rhel9 --run-strategy=Manual \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]

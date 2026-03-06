@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -19,7 +19,7 @@ setup_file() {
 # COMBO-25: --vms-per-namespace + --namespaces + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace + namespaces + no-snapshot DataSource clone" {
-  run bash "$VMSPAWN" -n --batch-id=cmb025 --vms-per-namespace=3 --namespaces=2 \
+  run bash "$VSTORM" -n --batch-id=cmb025 --datasource=rhel9 --vms-per-namespace=3 --namespaces=2 \
     --no-snapshot
   [ "$status" -eq 0 ]
 
@@ -43,7 +43,7 @@ setup_file() {
 # COMBO-26: --vms-per-namespace + --namespaces + --snapshot
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace + namespaces + snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb026 --vms-per-namespace=3 --namespaces=2 \
+  run bash "$VSTORM" -n --batch-id=cmb026 --datasource=rhel9 --vms-per-namespace=3 --namespaces=2 \
     --snapshot
   [ "$status" -eq 0 ]
 
@@ -69,8 +69,8 @@ setup_file() {
 # COMBO-27: --vms-per-namespace + --namespaces + --cloudinit
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace + namespaces + cloudinit (Secret per ns)" {
-  run bash "$VMSPAWN" -n --batch-id=cmb027 --vms-per-namespace=4 --namespaces=3 \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml
+  run bash "$VSTORM" -n --batch-id=cmb027 --datasource=rhel9 --vms-per-namespace=4 --namespaces=3 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- Total VMs = 4 * 3 = 12 ---
@@ -90,8 +90,8 @@ setup_file() {
 # COMBO-28: positional 7 3 + --no-snapshot + --cloudinit
 # ---------------------------------------------------------------
 @test "combo: positional args + no-snapshot + cloudinit" {
-  run bash "$VMSPAWN" -n --batch-id=cmb028 --no-snapshot \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml 7 3
+  run bash "$VSTORM" -n --batch-id=cmb028 --datasource=rhel9 --no-snapshot \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml 7 3
   [ "$status" -eq 0 ]
 
   # --- 7 VMs across 3 namespaces ---
@@ -115,7 +115,7 @@ setup_file() {
 # COMBO-29: positional 5 2 + --cores + --memory
 # ---------------------------------------------------------------
 @test "combo: positional args + cores + memory" {
-  run bash "$VMSPAWN" -n --batch-id=cmb029 --cores=4 --memory=8Gi 5 2
+  run bash "$VSTORM" -n --batch-id=cmb029 --datasource=rhel9 --cores=4 --memory=8Gi 5 2
   [ "$status" -eq 0 ]
 
   # --- 5 VMs across 2 namespaces ---
@@ -139,7 +139,7 @@ setup_file() {
 # COMBO-30: --basename + --pvc-base-name + --snapshot
 # ---------------------------------------------------------------
 @test "combo: basename + pvc-base-name + snapshot (both naming options)" {
-  run bash "$VMSPAWN" -n --batch-id=cmb030 --basename=myvm \
+  run bash "$VSTORM" -n --batch-id=cmb030 --datasource=rhel9 --basename=myvm \
     --pvc-base-name=myvm-base --snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -160,7 +160,7 @@ setup_file() {
 # COMBO-31: --basename=myvm + --snapshot (default pvc-base-name)
 # ---------------------------------------------------------------
 @test "combo: basename + snapshot with default pvc-base-name" {
-  run bash "$VMSPAWN" -n --batch-id=cmb031 --basename=myvm --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb031 --datasource=rhel9 --basename=myvm --snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -182,7 +182,7 @@ setup_file() {
 # COMBO-32: --datasource=fedora + --basename=custom-vm + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: datasource + different basename + no-snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb032 --datasource=fedora \
+  run bash "$VSTORM" -n --batch-id=cmb032 --datasource=fedora \
     --basename=custom-vm --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -202,7 +202,7 @@ setup_file() {
 # COMBO-33: --basename=myvm + --no-snapshot + --namespaces=2
 # ---------------------------------------------------------------
 @test "combo: basename + no-snapshot + multiple namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=cmb033 --basename=myvm --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb033 --datasource=rhel9 --basename=myvm --no-snapshot \
     --vms=4 --namespaces=2
   [ "$status" -eq 0 ]
 
@@ -224,7 +224,7 @@ setup_file() {
 # COMBO-34: --basename=myvm + --dv-url + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: basename + dv-url + no-snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb034 --basename=myvm \
+  run bash "$VSTORM" -n --batch-id=cmb034 --datasource=rhel9 --basename=myvm \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -248,7 +248,7 @@ setup_file() {
 #   VM_BASENAME even when DATASOURCE is empty (--dv-url).
 # ---------------------------------------------------------------
 @test "combo: basename + dv-url + snapshot" {
-  run bash "$VMSPAWN" -n --batch-id=cmb034a --basename=myvm \
+  run bash "$VSTORM" -n --batch-id=cmb034a --datasource=rhel9 --basename=myvm \
     --dv-url=http://example.com/disk.qcow2 --snapshot \
     --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
@@ -279,7 +279,7 @@ setup_file() {
 #   BASE_PVC_NAME=vm-base.
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot with default basename" {
-  run bash "$VMSPAWN" -n --batch-id=cmb034b \
+  run bash "$VSTORM" -n --batch-id=cmb034b --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -301,7 +301,7 @@ setup_file() {
 #   and VMs, all using the custom basename.
 # ---------------------------------------------------------------
 @test "combo: basename + dv-url + snapshot + multiple namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=cmb034c --basename=myvm \
+  run bash "$VSTORM" -n --batch-id=cmb034c --datasource=rhel9 --basename=myvm \
     --dv-url=http://example.com/disk.qcow2 --snapshot \
     --vms=4 --namespaces=2
   [ "$status" -eq 0 ]
@@ -345,7 +345,7 @@ setup_file() {
 # COMBO-35: --vms-per-namespace overrides --vms
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace overrides vms flag" {
-  run bash "$VMSPAWN" -n --batch-id=cmb035 --vms-per-namespace=3 --vms=10 \
+  run bash "$VSTORM" -n --batch-id=cmb035 --datasource=rhel9 --vms-per-namespace=3 --vms=10 \
     --namespaces=2
   [ "$status" -eq 0 ]
 
@@ -361,7 +361,7 @@ setup_file() {
 # COMBO-36: --vms=10 + positional arg 5 → positional overrides
 # ---------------------------------------------------------------
 @test "combo: positional arg overrides --vms flag" {
-  run bash "$VMSPAWN" -n --batch-id=cmb036 --vms=10 5
+  run bash "$VSTORM" -n --batch-id=cmb036 --datasource=rhel9 --vms=10 5
   [ "$status" -eq 0 ]
 
   # --- Positional arg 5 overrides --vms=10 ---
@@ -376,7 +376,7 @@ setup_file() {
 # COMBO-37: --snapshot-class + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: snapshot-class + no-snapshot (explicit no-snapshot wins)" {
-  run bash "$VMSPAWN" -n --batch-id=cmb037 --snapshot-class=my-snap \
+  run bash "$VSTORM" -n --batch-id=cmb037 --datasource=rhel9 --snapshot-class=my-snap \
     --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -389,7 +389,7 @@ setup_file() {
 # COMBO-38: --snapshot-class alone (no --storage-class)
 # ---------------------------------------------------------------
 @test "combo: snapshot-class alone keeps snapshot mode on" {
-  run bash "$VMSPAWN" -n --batch-id=cmb038 --snapshot-class=my-snap \
+  run bash "$VSTORM" -n --batch-id=cmb038 --datasource=rhel9 --snapshot-class=my-snap \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -403,7 +403,7 @@ setup_file() {
 # COMBO-39: --stop + --wait (dry-run; Halted VMs won't run)
 # ---------------------------------------------------------------
 @test "combo: stop + wait accepted without error in dry-run" {
-  run bash "$VMSPAWN" -n --batch-id=cmb039 --stop --wait \
+  run bash "$VSTORM" -n --batch-id=cmb039 --datasource=rhel9 --stop --wait \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -416,7 +416,7 @@ setup_file() {
 # COMBO-40: --dv-url + --datasource (dv-url clears datasource)
 # ---------------------------------------------------------------
 @test "combo: dv-url overrides datasource" {
-  run bash "$VMSPAWN" -n --batch-id=cmb040 \
+  run bash "$VSTORM" -n --batch-id=cmb040 --datasource=rhel9 \
     --datasource=fedora --dv-url=http://example.com/disk.qcow2 \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -434,7 +434,7 @@ setup_file() {
 # COMBO-41: --start + --stop (last one wins)
 # ---------------------------------------------------------------
 @test "combo: start then stop — last flag wins" {
-  run bash "$VMSPAWN" -n --batch-id=cmb041 --start --stop \
+  run bash "$VSTORM" -n --batch-id=cmb041 --datasource=rhel9 --start --stop \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -446,7 +446,7 @@ setup_file() {
 # COMBO-42: --run-strategy=Halted + --start (start overrides)
 # ---------------------------------------------------------------
 @test "combo: run-strategy Halted then start — start overrides" {
-  run bash "$VMSPAWN" -n --batch-id=cmb042 --run-strategy=Halted --start \
+  run bash "$VSTORM" -n --batch-id=cmb042 --datasource=rhel9 --run-strategy=Halted --start \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 

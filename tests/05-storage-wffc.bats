@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -22,7 +22,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteOnce
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=sp0001 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=sp0001 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -44,7 +44,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteMany
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=sp0002 --storage-class=ocs-rbd-virt \
+  run bash "$VSTORM" -n --batch-id=sp0002 --datasource=rhel9 --storage-class=ocs-rbd-virt \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -67,7 +67,7 @@ setup_file() {
   unset MOCK_ACCESS_MODE
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=sp0003 --storage-class=unknown-sc \
+  run bash "$VSTORM" -n --batch-id=sp0003 --datasource=rhel9 --storage-class=unknown-sc \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -90,7 +90,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteMany
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=sp0004 --rwo --storage-class=ocs-rbd-virt \
+  run bash "$VSTORM" -n --batch-id=sp0004 --datasource=rhel9 --rwo --storage-class=ocs-rbd-virt \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -113,7 +113,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteOnce
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=sp0005 --rwx --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=sp0005 --datasource=rhel9 --rwx --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -141,7 +141,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=wf0001 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=wf0001 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -165,7 +165,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=wf0002 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=wf0002 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=2 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2
 
@@ -190,7 +190,7 @@ setup_file() {
   export MOCK_BIND_MODE=Immediate
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=wf0003 --storage-class=lvms-nvme-sc-imm \
+  run bash "$VSTORM" -n --batch-id=wf0003 --datasource=rhel9 --storage-class=lvms-nvme-sc-imm \
     --no-snapshot --vms=1 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2
 
@@ -214,7 +214,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=wf0004 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=wf0004 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --snapshot --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -244,7 +244,7 @@ setup_file() {
   export MOCK_BIND_MODE=WaitForFirstConsumer
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VMSPAWN" -n --batch-id=wf0005 --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=wf0005 --datasource=rhel9 --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -263,7 +263,7 @@ setup_file() {
 # OPT-1: --pvc-base-name sets the VolumeSnapshot PVC source name
 # ---------------------------------------------------------------
 @test "option: --pvc-base-name changes VolumeSnapshot PVC source" {
-  run bash "$VMSPAWN" -n --batch-id=opt001 --pvc-base-name=custom-base \
+  run bash "$VSTORM" -n --batch-id=opt001 --datasource=rhel9 --pvc-base-name=custom-base \
     --snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -278,7 +278,7 @@ setup_file() {
 # OPT-2: --request-cpu sets CPU request in VM spec
 # ---------------------------------------------------------------
 @test "option: --request-cpu adds CPU request to VM spec" {
-  run bash "$VMSPAWN" -n --batch-id=opt002 --request-cpu=500m --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt002 --datasource=rhel9 --request-cpu=500m --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- resources.requests.cpu appears in VM spec ---
@@ -291,7 +291,7 @@ setup_file() {
 # OPT-3: --request-memory sets memory request in VM spec
 # ---------------------------------------------------------------
 @test "option: --request-memory adds memory request to VM spec" {
-  run bash "$VMSPAWN" -n --batch-id=opt003 --request-memory=512Mi --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt003 --datasource=rhel9 --request-memory=512Mi --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- resources.requests.memory appears in VM spec ---
@@ -304,7 +304,7 @@ setup_file() {
 # OPT-4: --request-cpu and --request-memory together
 # ---------------------------------------------------------------
 @test "option: --request-cpu and --request-memory together" {
-  run bash "$VMSPAWN" -n --batch-id=opt004 --request-cpu=2 --request-memory=4Gi \
+  run bash "$VSTORM" -n --batch-id=opt004 --datasource=rhel9 --request-cpu=2 --request-memory=4Gi \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -319,7 +319,7 @@ setup_file() {
 # OPT-5: --vms-per-namespace calculates total VMs correctly
 # ---------------------------------------------------------------
 @test "option: --vms-per-namespace calculates total VMs" {
-  run bash "$VMSPAWN" -n --batch-id=opt005 --vms-per-namespace=3 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=opt005 --datasource=rhel9 --vms-per-namespace=3 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- Total VMs = 3 * 2 = 6 ---
@@ -341,7 +341,7 @@ setup_file() {
 # OPT-6: --run-strategy sets custom run strategy
 # ---------------------------------------------------------------
 @test "option: --run-strategy sets custom run strategy" {
-  run bash "$VMSPAWN" -n --batch-id=opt006 --run-strategy=RerunOnFailure \
+  run bash "$VSTORM" -n --batch-id=opt006 --datasource=rhel9 --run-strategy=RerunOnFailure \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -352,7 +352,7 @@ setup_file() {
 # OPT-7: --start sets runStrategy to Always
 # ---------------------------------------------------------------
 @test "option: --start sets runStrategy to Always" {
-  run bash "$VMSPAWN" -n --batch-id=opt007 --start --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt007 --datasource=rhel9 --start --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Always"* ]]
@@ -362,7 +362,7 @@ setup_file() {
 # OPT-8: --wait is accepted (dry-run does not actually wait)
 # ---------------------------------------------------------------
 @test "option: --wait is accepted without error" {
-  run bash "$VMSPAWN" -n --batch-id=opt008 --wait --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt008 --datasource=rhel9 --wait --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Dry-run succeeds; --wait doesn't affect YAML output ---
@@ -373,7 +373,7 @@ setup_file() {
 # OPT-9: --nowait is accepted (dry-run does not wait by default)
 # ---------------------------------------------------------------
 @test "option: --nowait is accepted without error" {
-  run bash "$VMSPAWN" -n --batch-id=opt009 --nowait --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt009 --datasource=rhel9 --nowait --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"kind: VirtualMachine"* ]]
@@ -383,7 +383,7 @@ setup_file() {
 # OPT-10: --create-existing-vm is accepted
 # ---------------------------------------------------------------
 @test "option: --create-existing-vm is accepted without error" {
-  run bash "$VMSPAWN" -n --batch-id=opt010 --create-existing-vm --vms=1 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=opt010 --datasource=rhel9 --create-existing-vm --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"kind: VirtualMachine"* ]]
@@ -393,7 +393,7 @@ setup_file() {
 # OPT-12: -h shows usage/help text
 # ---------------------------------------------------------------
 @test "option: -h displays help text" {
-  run bash "$VMSPAWN" -h
+  run bash "$VSTORM" -h
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Usage:"* ]]
@@ -406,7 +406,7 @@ setup_file() {
 # OPT-13: positional arguments set VMs and namespaces
 # ---------------------------------------------------------------
 @test "option: positional arguments set VMs and namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=opt013 8 3
+  run bash "$VSTORM" -n --batch-id=opt013 --datasource=rhel9 8 3
   [ "$status" -eq 0 ]
 
   # --- 8 VMs across 3 namespaces ---

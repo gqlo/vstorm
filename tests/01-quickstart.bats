@@ -5,7 +5,7 @@
 
 load 'helpers'
 
-VMSPAWN="./vstorm"
+VSTORM="./vstorm"
 
 setup_file() {
     setup_oc_mock
@@ -20,7 +20,7 @@ setup_file() {
 #   Default DataSource (rhel9), 10 VMs with custom CPU/memory
 # ---------------------------------------------------------------
 @test "QS: default DataSource, 4 cores 8Gi, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0001 --cores=4 --memory=8Gi --vms=10 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=qs0001 --datasource=rhel9 --cores=4 --memory=8Gi --vms=10 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- Namespaces ---
@@ -85,7 +85,7 @@ setup_file() {
 #   Different DataSource (fedora)
 # ---------------------------------------------------------------
 @test "QS: fedora DataSource, 5 VMs in 1 namespace" {
-  run bash "$VMSPAWN" -n --batch-id=qs0002 --datasource=fedora --vms=5 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=qs0002 --datasource=fedora --vms=5 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Single namespace ---
@@ -119,7 +119,7 @@ setup_file() {
 #   URL import mode
 # ---------------------------------------------------------------
 @test "QS: URL import, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0003 --vms=10 --namespaces=2 \
+  run bash "$VSTORM" -n --batch-id=qs0003 --vms=10 --namespaces=2 \
     --dv-url=http://myhost:8000/rhel9-disk.qcow2
   [ "$status" -eq 0 ]
 
@@ -157,12 +157,12 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# QS-4: ./vstorm --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=10 --namespaces=2
+# QS-4: ./vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 #   Custom cloud-init workload
 # ---------------------------------------------------------------
-@test "QS: custom cloud-init stress workload, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0004 --vms=10 --namespaces=2 \
-    --cloudinit=helpers/cloudinit-stress-workload.yaml
+@test "QS: custom cloud-init stress-ng workload, 10 VMs across 2 namespaces" {
+  run bash "$VSTORM" -n --batch-id=qs0004 --datasource=rhel9 --vms=10 --namespaces=2 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- DataSource mode (default) ---
@@ -193,11 +193,27 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
+# QS-4b: ./vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=1
+#   Custom cloud-init stress-ng workload (same file, different run)
+# ---------------------------------------------------------------
+@test "QS: custom cloud-init stress-ng workload, 5 VMs in 1 namespace" {
+  run bash "$VSTORM" -n --batch-id=qs004b --datasource=rhel9 --vms=5 --namespaces=1 \
+    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sourceRef"* ]]
+  [[ "$output" == *"cloudInitNoCloud"* ]]
+  [[ "$output" == *"secretRef"* ]]
+  local vm_count
+  vm_count=$(echo "$output" | grep -c "Creating VirtualMachine [0-9]")
+  [ "$vm_count" -eq 5 ]
+}
+
+# ---------------------------------------------------------------
 # QS-5: ./vstorm --datasource=centos-stream9 --vms=5 --namespaces=1
 #   Different DataSource with default cloud-init auto-applied
 # ---------------------------------------------------------------
 @test "QS: centos-stream9 DataSource with default cloud-init" {
-  run bash "$VMSPAWN" -n --batch-id=qs0005 --datasource=centos-stream9 --vms=5 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=qs0005 --datasource=centos-stream9 --vms=5 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- DV references centos-stream9 DataSource ---
@@ -228,7 +244,7 @@ setup_file() {
 #   Non-OCS storage class (snapshots auto-disabled)
 # ---------------------------------------------------------------
 @test "QS: non-OCS storage class auto-disables snapshots, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0006 --storage-class=my-nfs-sc --vms=10 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=qs0006 --datasource=rhel9 --storage-class=my-nfs-sc --vms=10 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- 2 namespaces ---
@@ -267,7 +283,7 @@ setup_file() {
 #   Custom storage + snapshot class pair (snapshots enabled)
 # ---------------------------------------------------------------
 @test "QS: custom storage and snapshot class pair, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0007 --storage-class=my-rbd-sc \
+  run bash "$VSTORM" -n --batch-id=qs0007 --datasource=rhel9 --storage-class=my-rbd-sc \
     --snapshot-class=my-rbd-snap --vms=10 --namespaces=2
   [ "$status" -eq 0 ]
 
@@ -298,7 +314,7 @@ setup_file() {
 #   Explicit no-snapshot mode
 # ---------------------------------------------------------------
 @test "QS: explicit no-snapshot, 10 VMs across 2 namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=qs0008 --no-snapshot --vms=10 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=qs0008 --datasource=rhel9 --no-snapshot --vms=10 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- 2 namespaces ---
@@ -331,7 +347,7 @@ setup_file() {
 #   Dry-run mode (same as QS-1 but verifying dry-run behavior)
 # ---------------------------------------------------------------
 @test "QS: dry-run does not emit oc apply commands" {
-  run bash "$VMSPAWN" -n --batch-id=qs0009 --vms=10 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=qs0009 --datasource=rhel9 --vms=10 --namespaces=2
   [ "$status" -eq 0 ]
 
   # --- Outputs YAML ---
@@ -358,7 +374,7 @@ setup_file() {
 # Dry-run YAML file tests
 # ---------------------------------------------------------------
 @test "dry-run: saves YAML file with all resources" {
-  run bash "$VMSPAWN" -n --batch-id=dry001 --vms=3 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dry001 --datasource=rhel9 --vms=3 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- File exists ---
@@ -385,7 +401,7 @@ setup_file() {
 }
 
 @test "dry-run: YAML file has correct batch ID and namespaces" {
-  run bash "$VMSPAWN" -n --batch-id=dry002 --vms=2 --namespaces=2
+  run bash "$VSTORM" -n --batch-id=dry002 --datasource=rhel9 --vms=2 --namespaces=2
   [ "$status" -eq 0 ]
 
   [ -f logs/dry002-dryrun.yaml ]
@@ -409,7 +425,7 @@ setup_file() {
 }
 
 @test "dry-run: no-snapshot mode saves DataSource clone YAML" {
-  run bash "$VMSPAWN" -n --batch-id=dry003 --no-snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dry003 --datasource=rhel9 --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   [ -f logs/dry003-dryrun.yaml ]
@@ -430,7 +446,7 @@ setup_file() {
 }
 
 @test "dry-run: quiet mode does not create YAML file" {
-  run bash "$VMSPAWN" -q --batch-id=dry004 --vms=1 --namespaces=1
+  run bash "$VSTORM" -q --batch-id=dry004 --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- No YAML file created ---
@@ -445,7 +461,7 @@ setup_file() {
 #   Delete batch
 # ---------------------------------------------------------------
 @test "QS: delete batch dry-run shows correct oc delete command" {
-  run bash "$VMSPAWN" -n --delete=a3f7b2
+  run bash "$VSTORM" -n --delete=a3f7b2
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"dry-run"* ]]

@@ -24,7 +24,7 @@ Backed by 193 unit tests, live cluster validation, and CI on every push
 - [Cloud-init](#cloud-init)
 - [Cluster profiling](#cluster-profiling)
 - [Development](#development)
-- **Docs:** [logging](docs/logging.md) | [stress workload](docs/stress-workload.md) | [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md)
+- **Docs:** [logging](docs/logging.md) | [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) | [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md)
 - **Helpers:** [vm-ssh](helpers/vm-ssh) | [vm-export](helpers/vm-export) | [install-virtctl](helpers/install-virtctl) | [stress_ng_random_vm.sh](helpers/stress_ng_random_vm.sh)
 
 ---
@@ -55,16 +55,16 @@ The first `echo` adds the vstorm directory to your `PATH` so you can run `vstorm
 ### Examples
 
 ```bash
-# Create 10 RHEL9 VMs (4 cores, 8Gi memory) using default OCS storage class
-# Defaults: datasource=rhel9, snapshot mode=on, access mode=auto-detect, cloud-init=auto
+# Create 10 VMs (4 cores, 8Gi memory) using default image (RHEL9 UEFI QCOW2 from URL) and OCS storage
+# Defaults: disk from URL (rhel9_uefi.qcow2), snapshot mode=on, access mode=auto-detect; pass --cloudinit for cloud-init
 vstorm --cores=4 --memory=8Gi --vms=10 --namespaces=2
 
 # Use a different DataSource (e.g. Fedora) with default OCS storage
 # VM basename auto-derived: "fedora", base DV: "fedora-base", secret: "fedora-cloudinit"
 vstorm --datasource=fedora --vms=5 --namespaces=1
 
-# Import a custom QCOW2 instead of using a DataSource (default OCS storage)
-# No cloud-init auto-injected in URL mode; VM basename: "vm", base DV: "vm-base"
+# Use a different disk image URL (overrides default RHEL9 UEFI QCOW2)
+# No cloud-init auto-injected unless you pass --cloudinit; VM basename: "vm"
 vstorm --dv-url=http://myhost:8000/rhel9-disk.qcow2 --vms=10 --namespaces=2
 
 # No storage class available? Boot Fedora VMs directly from a container image
@@ -73,7 +73,7 @@ vstorm --containerdisk --vms=5 --namespaces=1
 
 # Create VMs with a cloud-init workload injected at boot (default OCS storage)
 # Custom cloud-init replaces the default auto-injected one
-vstorm --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=10 --namespaces=2
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 
 # Use a different DataSource with default OCS storage (root password: password)
 # VM basename auto-derived: "centos-stream9"
@@ -111,13 +111,13 @@ Unless overridden, vstorm uses these built-in defaults:
 | Storage class | `ocs-storagecluster-ceph-rbd-virtualization` | OCS virtualization-optimized class |
 | Storage size | `32Gi` | Per-VM disk size |
 | Access mode | Auto-detected from StorageProfile | Falls back to `ReadWriteMany` |
-| DataSource | `rhel9` | From `openshift-virtualization-os-images` namespace |
+| Disk source | URL import (default) | RHEL9 UEFI QCOW2; use `--datasource=NAME` for OCP DataSource |
 | Snapshot mode | **enabled** | Auto-disabled when custom `--storage-class` is used without `--snapshot-class` |
 | Snapshot class | `ocs-storagecluster-rbdplugin-snapclass` | Used when snapshot mode is enabled |
 | Container disk | off | Enable with `--containerdisk`; default image `quay.io/containerdisks/fedora:latest` |
 | Run strategy | `Always` | VMs start immediately |
-| Cloud-init | Auto-injected for DataSource and container disk VMs | Sets root password to `password`; not injected for `--dv-url` |
-| VM basename | Derived from DataSource or image name | e.g. `rhel9`, `fedora`; `fedora` for default containerdisk; generic `vm` for `--dv-url` |
+| Cloud-init | Not auto-injected in default (URL) mode | Pass `--cloudinit` or use `--datasource`/`--containerdisk` for auto-inject (root: `password`) |
+| VM basename | `vm` for default URL; derived for DataSource/container disk | e.g. `rhel9`, `fedora` for `--datasource`/`--containerdisk` |
 
 ## How it works
 
@@ -165,7 +165,7 @@ vstorm auto-detects most storage settings from the cluster. Here are the common 
 | VolumeSnapshot never becomes ready | No matching VolumeSnapshotClass for your storage | Pass `--snapshot-class=CLASS`, or omit it to auto-disable snapshots |
 | VMs can't live-migrate | PVCs use ReadWriteOnce (local storage) | Expected -- use shared storage (Ceph/NFS) with RWX for live migration |
 
-In DataSource mode (default), a cloud-init is auto-injected to enable root SSH with password `password`.
+In DataSource and container disk modes, a cloud-init is auto-injected (root password: `password`). In default (URL) mode, no cloud-init is injected unless you pass `--cloudinit`.
 
 VMs are distributed evenly across namespaces, with any remainder allocated to the first namespaces.
 
@@ -258,8 +258,8 @@ Usage: vstorm [options] [number_of_vms [number_of_namespaces]]
     --rwo                       Shortcut for --access-mode=ReadWriteOnce
     --rwx                       Shortcut for --access-mode=ReadWriteMany
 
-    --datasource=NAME           Clone from OCP DataSource (default: rhel9)
-    --dv-url=URL                Import disk from URL (overrides --datasource)
+    --datasource=NAME           Clone from OCP DataSource (overrides default URL)
+    --dv-url=URL                Import disk from URL (default: RHEL9 UEFI QCOW2)
     --containerdisk[=IMAGE]     Boot VMs from a container image -- no storage class needed
                                 (default: quay.io/containerdisks/fedora:latest)
     --snapshot-class=class      Snapshot class name (implies --snapshot)
@@ -300,7 +300,7 @@ Cloud-init user-data is stored in a per-namespace Kubernetes Secret and referenc
 
 ### Default cloud-init (DataSource and container disk modes)
 
-When using a DataSource (the default) or `--containerdisk`, a built-in cloud-init (`helpers/cloudinit-default.yaml`) is automatically injected if no `--cloudinit` is specified. It configures:
+When using `--datasource` or `--containerdisk`, a built-in cloud-init (`helpers/cloudinit-default.yaml`) is automatically injected if no `--cloudinit` is specified. It configures:
 
 - **Root password**: `password`
 - **PasswordAuthentication**: enabled in sshd
@@ -314,17 +314,19 @@ vstorm --vms=10 --namespaces=2
 vstorm --containerdisk --vms=5 --namespaces=1
 ```
 
-To override, pass your own file with `--cloudinit=FILE`. In URL mode (`--dv-url`), no cloud-init is injected unless explicitly requested.
+To override, pass your own file with `--cloudinit=FILE`. In default (URL) mode, no cloud-init is injected unless you pass `--cloudinit`.
 
 ### Custom cloud-init
 
 Use `--cloudinit=FILE` to inject any cloud-init user-data file:
 
 ```bash
-vstorm --cloudinit=helpers/cloudinit-stress-workload.yaml --vms=10 --namespaces=2
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 ```
 
-The `cloudinit-stress-workload.yaml` config installs `stress-ng` and runs a bursty workload simulator as a systemd service. See [docs/stress-workload.md](docs/stress-workload.md) for details.
+The unified workload cloud-init lives in `workload/`. See [docs/cloud-init-stress-ng-workload.md](docs/cloud-init-stress-ng-workload.md) for design, flow, and parameters.
+
+- **workload/cloudinit-stress-ng-workload.yaml** — Installs `stress-ng` and runs a configurable workload. Set `WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced`. Override via `--env KEY=VAL` (repeatable). See [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) for presets, min/max, and copy-paste commands.
 
 ## Custom templates
 
@@ -362,7 +364,7 @@ profiles are captured as instantaneous snapshots at dump time.
 vstorm --profile --vms=20 --namespaces=4
 
 # Profile only virt-controller during a 50-VM stress workload run
-vstorm --profile=virt-controller --cloudinit=helpers/cloudinit-stress-workload.yaml \
+vstorm --profile=virt-controller --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
   --vms=50 --namespaces=10
 ```
 
@@ -398,8 +400,8 @@ The hook runs only the checks relevant to the files you are committing:
 
 | Staged files | Check |
 |---|---|
-| `vstorm`, `templates/*`, `helpers/*`, `tests/*.bats` | `bats tests/` |
-| `helpers/*.yaml` | `yamllint` on changed files |
+| `vstorm`, `templates/*`, `helpers/*`, `workload/*`, `tests/*.bats` | `bats tests/` |
+| `helpers/*.yaml`, `workload/*.yaml` | `yamllint` on changed files |
 | `*.md` | `markdownlint-cli2` on changed files |
 
 If any check fails, the commit is aborted. Fix the issues and commit again. In emergencies, use `git commit --no-verify` to skip the hook.
@@ -412,7 +414,7 @@ tab-completion/
   vstorm.bash       # Bash tab completion (source to enable)
 docs/
   logging.md         # logging, manifests, and logs/ directory structure
-  stress-workload.md # stress-ng workload simulator documentation
+  cloud-init-stress-ng-workload.md # cloud-init and stress-ng workload
   testing.md         # how tests work, categories, and CI pipeline
 helpers/
   install-virtctl    # download and install virtctl from the cluster
@@ -420,7 +422,8 @@ helpers/
   vm-export          # export a VM disk as a qcow2 image
   stress_ng_random_vm.sh            # standalone stress-ng workload script
   cloudinit-default.yaml            # default cloud-init (root password SSH)
-  cloudinit-stress-workload.yaml    # cloud-init user-data for stress workload
+workload/
+  cloudinit-stress-ng-workload.yaml  # unified stress-ng workload (WORKLOAD_TYPE, env overrides)
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)
 templates/

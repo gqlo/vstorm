@@ -1,0 +1,150 @@
+#cloud-config
+ssh_pwauth: true
+disable_root: false
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: password
+      type: text
+
+packages:
+  - stress-ng
+
+write_files:
+  - path: /opt/stress_ng_random_vm.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Unified stress-ng workload: set WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced (default: memory-heavy).
+      # Override via env: ACTIVE_PROBABILITY, CPU_PERCENT_MIN/MAX, MEM_PERCENT_MIN/MAX, STRESS_TOGETHER, DURATION_MIN/MAX.
+      # Use /etc/default/stress-workload or systemd Environment= to customize.
+
+      # Install stress-ng if not already present
+      if ! command -v stress-ng &> /dev/null; then
+          echo "stress-ng not found, installing..."
+          if command -v dnf &> /dev/null; then
+              dnf install -y epel-release 2>/dev/null || true
+              dnf install -y stress-ng
+          elif command -v yum &> /dev/null; then
+              yum install -y epel-release 2>/dev/null || true
+              yum install -y stress-ng
+          elif command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y stress-ng
+          else
+              echo "Error: no supported package manager found."
+              exit 1
+          fi
+          if ! command -v stress-ng &> /dev/null; then
+              echo "Error: failed to install stress-ng."
+              exit 1
+          fi
+      fi
+
+      # Function to generate a random number between min and max
+      random_range() {
+          local min=$1
+          local max=$2
+          echo $(( min + RANDOM % (max - min + 1) ))
+      }
+
+      # WORKLOAD_TYPE preset (env overrides below)
+      WORKLOAD_TYPE="${WORKLOAD_TYPE:-memory-heavy}"
+      case "$WORKLOAD_TYPE" in
+          memory-heavy) _cpu_min=10;  _cpu_max=50;  _mem_min=80; _mem_max=95; _active=100; _together=false ;;
+          cpu-heavy)    _cpu_min=50;  _cpu_max=100; _mem_min=20; _mem_max=80; _active=100; _together=false ;;
+          balanced)     _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _active=100; _together=false ;;
+          *)            _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _active=100; _together=false ;;
+      esac
+
+      # Tunables (env overrides preset)
+      DURATION_MIN="${DURATION_MIN:-5}"
+      DURATION_MAX="${DURATION_MAX:-600}"
+      ACTIVE_PROBABILITY="${ACTIVE_PROBABILITY:-$_active}"
+      CPU_PERCENT_MIN="${CPU_PERCENT_MIN:-$_cpu_min}"
+      CPU_PERCENT_MAX="${CPU_PERCENT_MAX:-$_cpu_max}"
+      MEM_PERCENT_MIN="${MEM_PERCENT_MIN:-$_mem_min}"
+      MEM_PERCENT_MAX="${MEM_PERCENT_MAX:-$_mem_max}"
+      CPU_CORES=$(nproc)
+      MEM_WORKERS=1
+
+      # STRESS_TOGETHER: true/1/yes = one process; false/0/separate = two processes
+      STRESS_TOGETHER="${STRESS_TOGETHER:-$_together}"
+      [[ "$STRESS_TOGETHER" =~ ^(true|1|yes)$ ]] && STRESS_TOGETHER=true || STRESS_TOGETHER=false
+
+      # Memory percentage range (cap at 95 for safety); drawn per cycle
+      _mem_max_cap=$MEM_PERCENT_MAX
+      (( _mem_max_cap > 95 )) && _mem_max_cap=95
+      TOTAL_MEM=$(free -m | awk '/^Mem:/{print $2}')
+
+      echo "Starting workload simulation (WORKLOAD_TYPE=$WORKLOAD_TYPE, running forever)"
+      echo "ACTIVE_PROBABILITY=$ACTIVE_PROBABILITY% | STRESS_TOGETHER=$STRESS_TOGETHER"
+      echo "Using $CPU_CORES CPU cores, CPU ${CPU_PERCENT_MIN}%-${CPU_PERCENT_MAX}%"
+      echo "Memory: range ${MEM_PERCENT_MIN}-${MEM_PERCENT_MAX}% per cycle"
+      echo ""
+
+      # Run forever
+      cycle=1
+      while true; do
+          # Generate random parameters for this cycle
+          duration=$(random_range $DURATION_MIN $DURATION_MAX)
+          cpu_load=$(random_range $CPU_PERCENT_MIN $CPU_PERCENT_MAX)
+          mem_percent=$(random_range $MEM_PERCENT_MIN $_mem_max_cap)
+          mem_to_use=$(( TOTAL_MEM * mem_percent / 100 ))
+
+          # Determine if VM will be active this cycle (random probability)
+          active_roll=$(random_range 1 100)
+          if [ "$active_roll" -le "$ACTIVE_PROBABILITY" ]; then
+              # VM is active - run stress
+              if $STRESS_TOGETHER; then
+                  echo "Cycle $cycle: ACTIVE (together) - Running stress test for $duration seconds..."
+                  echo "  - CPU: $cpu_load%"
+                  echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
+                  stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration}s > /dev/null 2>&1
+              else
+                  duration_cpu=$(random_range $DURATION_MIN $DURATION_MAX)
+                  duration_mem=$(random_range $DURATION_MIN $DURATION_MAX)
+                  echo "Cycle $cycle: ACTIVE (separate) - CPU ${duration_cpu}s, Memory ${duration_mem}s"
+                  echo "  - CPU: $cpu_load%"
+                  echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
+                  stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration_cpu}s > /dev/null 2>&1 &
+                  stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration_mem}s > /dev/null 2>&1
+                  wait
+              fi
+          else
+              # VM is inactive - just idle for the duration
+              echo "Cycle $cycle: IDLE - Sleeping for $duration seconds..."
+              sleep $duration
+          fi
+          ((cycle++))
+      done
+
+  - path: /etc/default/vstorm-guest-env
+    permissions: '0644'
+    content: |
+      {VSTORM_GUEST_ENV}
+
+  - path: /etc/systemd/system/stress-workload.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Unified stress-ng workload simulator (WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced)
+      After=network.target
+
+      [Service]
+      Type=simple
+      EnvironmentFile=-/etc/default/vstorm-guest-env
+      EnvironmentFile=-/etc/default/stress-workload
+      ExecStart=/opt/stress_ng_random_vm.sh
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd 2>/dev/null || systemctl restart ssh
+  - ["systemctl", "daemon-reload"]
+  - ["systemctl", "enable", "--now", "stress-workload.service"]
