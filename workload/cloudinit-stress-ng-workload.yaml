@@ -17,7 +17,8 @@ write_files:
     content: |
       #!/bin/bash
       # Unified stress-ng workload: set WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced (default: memory-heavy).
-      # Override via env: ACTIVE_PROBABILITY, CPU_PERCENT_MIN/MAX, MEM_PERCENT_MIN/MAX, STRESS_TOGETHER, DURATION_MIN/MAX.
+      # Override via env: CPU_ACTIVE_PROBABILITY, MEM_ACTIVE_PROBABILITY (default 50% each), CPU_PERCENT_MIN/MAX, MEM_PERCENT_MIN/MAX, STRESS_TOGETHER, DURATION_MIN/MAX.
+      # Set CPU_ACTIVE_PROBABILITY and MEM_ACTIVE_PROBABILITY to different values to run CPU and memory stress out of sync (CPU-only, memory-only, or both per cycle).
       # Use /etc/default/stress-workload or systemd Environment= to customize.
 
       # Install stress-ng if not already present
@@ -51,16 +52,17 @@ write_files:
       # WORKLOAD_TYPE preset (env overrides below)
       WORKLOAD_TYPE="${WORKLOAD_TYPE:-memory-heavy}"
       case "$WORKLOAD_TYPE" in
-          memory-heavy) _cpu_min=10;  _cpu_max=50;  _mem_min=80; _mem_max=95; _active=100; _together=false ;;
-          cpu-heavy)    _cpu_min=50;  _cpu_max=100; _mem_min=20; _mem_max=80; _active=100; _together=false ;;
-          balanced)     _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _active=100; _together=false ;;
-          *)            _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _active=100; _together=false ;;
+          memory-heavy) _cpu_min=10;  _cpu_max=50;  _mem_min=80; _mem_max=95; _together=false ;;
+          cpu-heavy)    _cpu_min=50;  _cpu_max=100; _mem_min=20; _mem_max=80; _together=false ;;
+          balanced)     _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _together=false ;;
+          *)            _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _together=false ;;
       esac
 
       # Tunables (env overrides preset)
       DURATION_MIN="${DURATION_MIN:-5}"
       DURATION_MAX="${DURATION_MAX:-600}"
-      ACTIVE_PROBABILITY="${ACTIVE_PROBABILITY:-$_active}"
+      CPU_ACTIVE_PROBABILITY="${CPU_ACTIVE_PROBABILITY:-50}"
+      MEM_ACTIVE_PROBABILITY="${MEM_ACTIVE_PROBABILITY:-50}"
       CPU_PERCENT_MIN="${CPU_PERCENT_MIN:-$_cpu_min}"
       CPU_PERCENT_MAX="${CPU_PERCENT_MAX:-$_cpu_max}"
       MEM_PERCENT_MIN="${MEM_PERCENT_MIN:-$_mem_min}"
@@ -78,7 +80,7 @@ write_files:
       TOTAL_MEM=$(free -m | awk '/^Mem:/{print $2}')
 
       echo "Starting workload simulation (WORKLOAD_TYPE=$WORKLOAD_TYPE, running forever)"
-      echo "ACTIVE_PROBABILITY=$ACTIVE_PROBABILITY% | STRESS_TOGETHER=$STRESS_TOGETHER"
+      echo "CPU_ACTIVE_PROBABILITY=$CPU_ACTIVE_PROBABILITY% | MEM_ACTIVE_PROBABILITY=$MEM_ACTIVE_PROBABILITY% | STRESS_TOGETHER=$STRESS_TOGETHER"
       echo "Using $CPU_CORES CPU cores, CPU ${CPU_PERCENT_MIN}%-${CPU_PERCENT_MAX}%"
       echo "Memory: range ${MEM_PERCENT_MIN}-${MEM_PERCENT_MAX}% per cycle"
       echo ""
@@ -92,10 +94,27 @@ write_files:
           mem_percent=$(random_range $MEM_PERCENT_MIN $_mem_max_cap)
           mem_to_use=$(( TOTAL_MEM * mem_percent / 100 ))
 
-          # Determine if VM will be active this cycle (random probability)
-          active_roll=$(random_range 1 100)
-          if [ "$active_roll" -le "$ACTIVE_PROBABILITY" ]; then
-              # VM is active - run stress
+          # Independent rolls: run CPU and/or memory this cycle (allows CPU and memory out of sync)
+          cpu_roll=$(random_range 1 100)
+          mem_roll=$(random_range 1 100)
+          run_cpu=false
+          run_mem=false
+          [ "$cpu_roll" -le "$CPU_ACTIVE_PROBABILITY" ] && run_cpu=true
+          [ "$mem_roll" -le "$MEM_ACTIVE_PROBABILITY" ] && run_mem=true
+
+          if ! $run_cpu && ! $run_mem; then
+              echo "Cycle $cycle: IDLE - Sleeping for $duration seconds..."
+              sleep $duration
+          elif $run_cpu && ! $run_mem; then
+              echo "Cycle $cycle: CPU only - Running CPU stress for $duration seconds..."
+              echo "  - CPU: $cpu_load%"
+              stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration}s > /dev/null 2>&1
+          elif ! $run_cpu && $run_mem; then
+              echo "Cycle $cycle: MEM only - Running memory stress for $duration seconds..."
+              echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
+              stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration}s > /dev/null 2>&1
+          else
+              # Both CPU and memory this cycle
               if $STRESS_TOGETHER; then
                   echo "Cycle $cycle: ACTIVE (together) - Running stress test for $duration seconds..."
                   echo "  - CPU: $cpu_load%"
@@ -111,14 +130,9 @@ write_files:
                   stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration_mem}s > /dev/null 2>&1
                   wait
               fi
-          else
-              # VM is inactive - just idle for the duration
-              echo "Cycle $cycle: IDLE - Sleeping for $duration seconds..."
-              sleep $duration
           fi
           ((cycle++))
       done
-
   - path: /etc/default/vstorm-guest-env
     permissions: '0644'
     content: |

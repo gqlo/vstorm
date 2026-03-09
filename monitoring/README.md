@@ -9,19 +9,19 @@ From the repo root (or with paths adjusted), run the script and pass one or more
 **Single dashboard (default namespace `dittybopper`):**
 
 ```bash
-./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json
+./scripts/provision-grafana-dashboards.sh your-dashboard.json
 ```
 
 **Multiple dashboards:**
 
 ```bash
-./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json monitoring/dashboard/other-dashboard.json
+./scripts/provision-grafana-dashboards.sh your-dashboard.json other-dashboard.json
 ```
 
 **Custom namespace:**
 
 ```bash
-./monitoring/scripts/provision-grafana-dashboards.sh my-grafana-ns monitoring/dashboard/desched-cnv.json
+./scripts/provision-grafana-dashboards.sh my-grafana-ns your-dashboard.json
 ```
 
 **Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); first argument is only treated as namespace if it does not end in `.json`. Script: [provision-grafana-dashboards.sh](../scripts/provision-grafana-dashboards.sh).

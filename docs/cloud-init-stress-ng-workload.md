@@ -9,7 +9,7 @@ Run a configurable stress-ng workload inside VMs at boot. For VM CPU and memory 
 | Medium VMs + default (memory-heavy) workload | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --cores=4 --memory=8Gi --vms=10` |
 | CPU-heavy workload, 8 cores per VM | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --cores=8 --memory=16Gi --vms=5` |
 | Custom min/max CPU and memory % | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env CPU_PERCENT_MIN=25 --env CPU_PERCENT_MAX=75 --env MEM_PERCENT_MIN=40 --env MEM_PERCENT_MAX=85 --vms=10` |
-| Short duration, high activity | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env DURATION_MIN=5 --env DURATION_MAX=120 --env ACTIVE_PROBABILITY=85 --vms=10` |
+| Short duration, high activity | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env DURATION_MIN=5 --env DURATION_MAX=120 --env CPU_ACTIVE_PROBABILITY=85 --env MEM_ACTIVE_PROBABILITY=85 --vms=10` |
 | Dry-run to preview | `vstorm -n --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=5` |
 
 Default preset is **memory-heavy** (no `--env` needed). Combine with any VM sizing.
@@ -36,11 +36,11 @@ Cloud-init will install `stress-ng`, write the workload script to `/opt/stress_n
 
 ## Workload presets: `WORKLOAD_TYPE`
 
-| Preset | CPU load | Memory % | Active % | Use case |
-|--------|----------|----------|----------|----------|
-| `memory-heavy` | 10–50% | 80–95% | 100 | Memory pressure, migration |
-| `cpu-heavy` | 50–100% | 20–80% | 100 | CPU saturation |
-| `balanced` | 30–70% | 40–70% | 100 | Mixed load |
+| Preset | CPU load | Memory % | Use case |
+|--------|----------|----------|----------|
+| `memory-heavy` | 10–50% | 80–95% | Memory pressure, migration |
+| `cpu-heavy` | 50–100% | 20–80% | CPU saturation |
+| `balanced` | 30–70% | 40–70% | Mixed load |
 
 ```bash
 # Default is memory-heavy
@@ -59,7 +59,8 @@ Override with `--env KEY=VAL` (repeat as needed):
 |-----------|-------------|
 | `CPU_PERCENT_MIN`, `CPU_PERCENT_MAX` | CPU % when active |
 | `MEM_PERCENT_MIN`, `MEM_PERCENT_MAX` | Memory % (capped at 95) |
-| `ACTIVE_PROBABILITY` | Chance (1–100) the VM is active in a cycle |
+| `CPU_ACTIVE_PROBABILITY` | Chance (1–100) to run CPU stress in a cycle; default 50. Set with `MEM_ACTIVE_PROBABILITY` to different values to run CPU and memory out of sync (CPU-only, memory-only, or both per cycle). |
+| `MEM_ACTIVE_PROBABILITY` | Chance (1–100) to run memory stress in a cycle; default 50. |
 | `DURATION_MIN`, `DURATION_MAX` | Min/max stress duration in seconds (default 5–600) |
 | `STRESS_TOGETHER` | `true` = one process; `false` = separate CPU/memory |
 
@@ -72,13 +73,17 @@ vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
 
 # Short duration, high activity
 vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
-  --env DURATION_MIN=10 --env DURATION_MAX=60 --env ACTIVE_PROBABILITY=90 --vms=10
+  --env DURATION_MIN=10 --env DURATION_MAX=60 --env CPU_ACTIVE_PROBABILITY=90 --env MEM_ACTIVE_PROBABILITY=90 --vms=10
 
 # Combine preset + overrides
 vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
   --env WORKLOAD_TYPE=balanced \
-  --env CPU_PERCENT_MIN=50 --env CPU_PERCENT_MAX=90 --env ACTIVE_PROBABILITY=75 \
+  --env CPU_PERCENT_MIN=50 --env CPU_PERCENT_MAX=90 --env CPU_ACTIVE_PROBABILITY=75 --env MEM_ACTIVE_PROBABILITY=75 \
   --cores=4 --memory=8Gi --vms=10 --namespaces=2
+
+# CPU and memory out of sync: CPU active in ~70% of cycles, memory in ~40%
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+  --env CPU_ACTIVE_PROBABILITY=70 --env MEM_ACTIVE_PROBABILITY=40 --vms=10
 ```
 
 ## Monitoring
@@ -144,8 +149,7 @@ For contributors and users who want to understand or extend the workload.
 
 [workload/cloudinit-stress-ng-workload.yaml](../workload/cloudinit-stress-ng-workload.yaml): script at `/opt/stress_ng_random_vm.sh`, systemd unit at
 `/etc/systemd/system/stress-workload.service`, env from `--env` in `/etc/default/vstorm-guest-env`.
-The simulator runs in an infinite loop — each cycle it randomly decides active vs idle (`ACTIVE_PROBABILITY`),
-and when active runs `stress-ng` with randomized CPU/memory for a random duration (`DURATION_MIN`–`DURATION_MAX`).
+The simulator runs in an infinite loop — each cycle it rolls independently for CPU and memory (`CPU_ACTIVE_PROBABILITY`, `MEM_ACTIVE_PROBABILITY`; both default to 50%), so you can have CPU-only, memory-only, both, or idle. When stress runs, it uses randomized CPU/memory levels for a random duration (`DURATION_MIN`–`DURATION_MAX`).
 
 **Deployment**: Via `--cloudinit` (recommended), or set env with `--env KEY=VAL`; or copy and run the script standalone inside a VM (`scp` + `ssh`).
 
