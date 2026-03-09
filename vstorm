@@ -430,32 +430,33 @@ check_oc_connectivity() {
 	return "$rc"
 }
 
+# Ensure oc is installed and cluster is reachable. Exits with fatal if not.
+# Reused by check_prerequisites and by the delete path.
+ensure_oc_ready() {
+	if [[ -z "$(type -t oc)" ]] ; then
+		fatal "Error: oc command is not installed on system"
+	fi
+	local rc=0
+	check_oc_connectivity || rc=$?
+	if ((rc == 124)) ; then
+		fatal "Error: timed out reaching OpenShift cluster (${C_VAL}${OC_CONNECT_TIMEOUT:-30}s${C_RST}) -- check network connectivity"
+	elif ((rc != 0)) ; then
+		if [[ -n "${OC_WHOAMI_ERR:-}" ]] ; then
+			fatal "Error: ${OC_WHOAMI_ERR}"
+		else
+			fatal "Error: not logged into an OpenShift cluster (run 'oc login' first)"
+		fi
+	fi
+}
+
 # Check for prerequisites: oc CLI, OpenShift Virtualization,
 # ODF storage, and the configured storage class.
 # Reports all missing prerequisites before exiting.
 check_prerequisites() {
     local -i errors=0
 
-    if [[ -z "$(type -t oc)" ]] ; then
-	echo "${C_ERR}Error:${C_RST} oc command is not installed on system"
-	((errors++))
-    else
-	local rc=0
-	check_oc_connectivity || rc=$?
-	if ((rc == 124)) ; then
-	    echo "${C_ERR}Error:${C_RST} timed out reaching OpenShift cluster (${C_VAL}${OC_CONNECT_TIMEOUT:-30}s${C_RST}) -- check network connectivity"
-	    ((errors++))
-	elif ((rc != 0)) ; then
-	    if [[ -n "${OC_WHOAMI_ERR:-}" ]] ; then
-		echo "${C_ERR}Error:${C_RST} ${OC_WHOAMI_ERR}"
-	    else
-		echo "${C_ERR}Error:${C_RST} not logged into an OpenShift cluster (run 'oc login' first)"
-	    fi
-	    ((errors++))
-	fi
-    fi
+    ensure_oc_ready
 
-    if ((errors == 0)) ; then
 	if ! oc get ns openshift-cnv >/dev/null 2>&1 ; then
 	    echo "${C_ERR}Error:${C_RST} OpenShift Virtualization is not installed (openshift-cnv namespace not found)"
 	    ((errors++))
@@ -496,7 +497,6 @@ check_prerequisites() {
 		fi
 	    fi
 	fi
-    fi
 
     if ((errors > 0)) ; then
 	fatal "Prerequisite check failed with ${C_VAL}$errors${C_RST} error(s)"
@@ -1681,8 +1681,14 @@ main() {
 
 # Run delete or create
 if (( DELETE_ALL )) ; then
+    if ((doit)) ; then
+	ensure_oc_ready
+    fi
     delete_all_batches
 elif [[ -n "$DELETE_BATCH" ]] ; then
+    if ((doit)) ; then
+	ensure_oc_ready
+    fi
     delete_batch "$DELETE_BATCH"
 else
     if [[ -n "$PROFILE_TARGET" ]] ; then
