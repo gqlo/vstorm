@@ -18,7 +18,7 @@ write_files:
       #!/bin/bash
       # Unified stress-ng workload: set WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced (default: memory-heavy).
       # Override via env: CPU_ACTIVE_PROBABILITY, MEM_ACTIVE_PROBABILITY (default 50% each), CPU_PERCENT_MIN/MAX, MEM_PERCENT_MIN/MAX, STRESS_TOGETHER, DURATION_MIN/MAX.
-      # Set CPU_ACTIVE_PROBABILITY and MEM_ACTIVE_PROBABILITY to different values to run CPU and memory stress out of sync (CPU-only, memory-only, or both per cycle).
+      # Set STRESS_NG_CUSTOM_OPTS to use a custom stress-ng command on active cycles (all tunables still apply; vars like duration, mem_to_use, MEM_WORKERS, CPU_CORES, cpu_load are available).
       # Use /etc/default/stress-workload or systemd Environment= to customize.
 
       # Install stress-ng if not already present
@@ -83,6 +83,7 @@ write_files:
       echo "CPU_ACTIVE_PROBABILITY=$CPU_ACTIVE_PROBABILITY% | MEM_ACTIVE_PROBABILITY=$MEM_ACTIVE_PROBABILITY% | STRESS_TOGETHER=$STRESS_TOGETHER"
       echo "Using $CPU_CORES CPU cores, CPU ${CPU_PERCENT_MIN}%-${CPU_PERCENT_MAX}%"
       echo "Memory: range ${MEM_PERCENT_MIN}-${MEM_PERCENT_MAX}% per cycle"
+      [[ -n "${STRESS_NG_CUSTOM_OPTS:-}" ]] && echo "STRESS_NG_CUSTOM_OPTS is set: using CUSTOM-OPTS branch for active cycles (all tunables apply)."
       echo ""
 
       # Run forever
@@ -105,29 +106,35 @@ write_files:
           if ! $run_cpu && ! $run_mem; then
               echo "Cycle $cycle: IDLE - Sleeping for $duration seconds..."
               sleep $duration
+          elif [[ -n "${STRESS_NG_CUSTOM_OPTS:-}" ]]; then
+              # Tunables (lines 62-74) set DURATION_*, CPU/MEM_*_PROBABILITY, CPU/MEM_PERCENT_*, etc.
+              # Per-cycle vars (lines 91-95) set duration, cpu_load, mem_to_use from those. Same shell here, so
+              # STRESS_NG_CUSTOM_OPTS can use $duration, $mem_to_use, $cpu_load, $MEM_WORKERS, $CPU_CORES, etc.
+              echo "Cycle $cycle: CUSTOM-OPTS - Running stress-ng for $duration seconds..."
+              stress-ng $STRESS_NG_CUSTOM_OPTS --timeout ${duration}s > /dev/null 2>&1
           elif $run_cpu && ! $run_mem; then
               echo "Cycle $cycle: CPU only - Running CPU stress for $duration seconds..."
               echo "  - CPU: $cpu_load%"
               stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration}s > /dev/null 2>&1
           elif ! $run_cpu && $run_mem; then
               echo "Cycle $cycle: MEM only - Running memory stress for $duration seconds..."
-              echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
-              stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration}s > /dev/null 2>&1
+              echo "  - Memory: $mem_to_use MB ($mem_percent%)"
+              stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration}s > /dev/null 2>&1
           else
               # Both CPU and memory this cycle
               if $STRESS_TOGETHER; then
                   echo "Cycle $cycle: ACTIVE (together) - Running stress test for $duration seconds..."
                   echo "  - CPU: $cpu_load%"
-                  echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
-                  stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration}s > /dev/null 2>&1
+                  echo "  - Memory: $mem_to_use MB ($mem_percent%)"
+                  stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration}s > /dev/null 2>&1
               else
                   duration_cpu=$(random_range $DURATION_MIN $DURATION_MAX)
                   duration_mem=$(random_range $DURATION_MIN $DURATION_MAX)
                   echo "Cycle $cycle: ACTIVE (separate) - CPU ${duration_cpu}s, Memory ${duration_mem}s"
                   echo "  - CPU: $cpu_load%"
-                  echo "  - Memory: $mem_to_use MB ($mem_percent%, aggressive, vm-keep)"
+                  echo "  - Memory: $mem_to_use MB ($mem_percent%)"
                   stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration_cpu}s > /dev/null 2>&1 &
-                  stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-keep --aggressive --timeout ${duration_mem}s > /dev/null 2>&1
+                  stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration_mem}s > /dev/null 2>&1
                   wait
               fi
           fi

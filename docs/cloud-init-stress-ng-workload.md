@@ -10,6 +10,7 @@ Run a configurable stress-ng workload inside VMs at boot. For VM CPU and memory 
 | CPU-heavy workload, 8 cores per VM | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --cores=8 --memory=16Gi --vms=5` |
 | Custom min/max CPU and memory % | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env CPU_PERCENT_MIN=25 --env CPU_PERCENT_MAX=75 --env MEM_PERCENT_MIN=40 --env MEM_PERCENT_MAX=85 --vms=10` |
 | Short duration, high activity | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env DURATION_MIN=5 --env DURATION_MAX=120 --env CPU_ACTIVE_PROBABILITY=85 --env MEM_ACTIVE_PROBABILITY=85 --vms=10` |
+| Allocate RAM only (no CPU burn) | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env 'STRESS_NG_CUSTOM_OPTS=--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0' --vms=5` |
 | Dry-run to preview | `vstorm -n --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=5` |
 
 Default preset is **memory-heavy** (no `--env` needed). Combine with any VM sizing.
@@ -63,6 +64,7 @@ Override with `--env KEY=VAL` (repeat as needed):
 | `MEM_ACTIVE_PROBABILITY` | Chance (1–100) to run memory stress in a cycle; default 50. |
 | `DURATION_MIN`, `DURATION_MAX` | Min/max stress duration in seconds (default 5–600) |
 | `STRESS_TOGETHER` | `true` = one process; `false` = separate CPU/memory |
+| `STRESS_NG_CUSTOM_OPTS` | When set, active cycles run `stress-ng $STRESS_NG_CUSTOM_OPTS --timeout ${duration}s` (script appends `--timeout`). All other tunables still apply; you can use `$mem_to_use`, `$MEM_WORKERS`, `$duration`, `$CPU_CORES`, `$cpu_load`, etc. in the value. Example: allocate RAM without burning CPU: `--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0`. |
 
 ```bash
 # Custom CPU and memory range
@@ -84,6 +86,10 @@ vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
 # CPU and memory out of sync: CPU active in ~70% of cycles, memory in ~40%
 vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
   --env CPU_ACTIVE_PROBABILITY=70 --env MEM_ACTIVE_PROBABILITY=40 --vms=10
+
+# Custom stress-ng options: allocate RAM only (--vm-hang 0 = no CPU thrash). All tunables (duration, mem_to_use, etc.) still apply.
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+  --env 'STRESS_NG_CUSTOM_OPTS=--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0' --vms=5
 ```
 
 ## Monitoring

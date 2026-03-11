@@ -44,4 +44,8 @@ if [[ -z "$(type -t virtctl)" ]]; then
     fatal "virtctl command is not installed (see helpers/install-virtctl)"
 fi
 
-exec virtctl ssh --local-ssh-opts="-o PasswordAuthentication=yes" -n "$NS" "$USER@vmi/$VM"
+# Avoid "Too many authentication failures": skip pubkey so we don't exhaust server MaxAuthTries
+exec virtctl ssh \
+	--local-ssh-opts="-o PasswordAuthentication=yes" \
+	--local-ssh-opts="-o PubkeyAuthentication=no" \
+	-n "$NS" "$USER@vmi/$VM"

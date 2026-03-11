@@ -1307,19 +1307,20 @@ delete_batch() {
         return 0
     fi
 
-    # Show what will be deleted
+    # Show what will be deleted (counts only, not full listing)
+    local ns_list ns_count vm_count
+    ns_list=$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1}') || true
+    [[ -z "$ns_list" ]] && ns_count=0 || ns_count=$(echo "$ns_list" | wc -l)
+    vm_count=$(oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null | wc -l) || true
+    vm_count=${vm_count:-0}
+
     echo "Resources for batch '$batch':"
     echo ""
-    echo "Namespaces:"
-    oc get ns -l batch-id="$batch" --no-headers 2>/dev/null || true
-    echo ""
-    echo "VirtualMachines:"
-    oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null || true
+    echo "Namespaces: $ns_count"
+    echo "VirtualMachines: $vm_count"
     echo ""
 
     # Check if anything exists
-    local ns_count
-    ns_count=$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | wc -l)
     if ((ns_count == 0)) ; then
         echo "No resources found for batch '$batch'"
         return 0
@@ -1333,7 +1334,7 @@ delete_batch() {
 	if [[ -n "$ns_name" && ! "$ns_name" =~ ^vm-[a-zA-Z0-9._-]+-ns-[0-9]+$ ]] ; then
 	    fatal "Refusing to delete namespace '$ns_name': does not match vstorm naming pattern (vm-{batch}-ns-{N})"
 	fi
-    done <<< "$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1}')"
+    done <<< "$ns_list"
 
     # Confirmation prompt (unless --yes or called from delete_all_batches)
     if (( ! CONFIRM_DELETE )) && [[ "$skip_confirm" != "skip-confirm" ]] ; then

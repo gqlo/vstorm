@@ -115,3 +115,50 @@ _extract_stress_script() {
     [[ "$output" == *"ACTIVE (separate)"* ]]
     [[ "$output" == *"CPU "*"s, Memory "*"s"* ]]
 }
+
+# ---------------------------------------------------------------
+# CUSTOM-OPTS: when STRESS_NG_CUSTOM_OPTS is set, active cycles use it
+# ---------------------------------------------------------------
+@test "WL: branch CUSTOM-OPTS when STRESS_NG_CUSTOM_OPTS is set" {
+    local script_path
+    script_path=$(_extract_stress_script)
+    export STRESS_NG_CUSTOM_OPTS="--vm 1 --vm-bytes 10M --vm-hang 0"
+    export CPU_ACTIVE_PROBABILITY=100 MEM_ACTIVE_PROBABILITY=100 DURATION_MIN=1 DURATION_MAX=1
+    run timeout 5 bash "$script_path" 2>/dev/null || true
+    rm -f "$script_path"
+    [[ "$output" == *"CUSTOM-OPTS"* ]]
+    [[ "$output" == *"Running stress-ng for"* ]]
+}
+
+@test "WL: CUSTOM-OPTS startup banner when STRESS_NG_CUSTOM_OPTS is set" {
+    local script_path
+    script_path=$(_extract_stress_script)
+    export STRESS_NG_CUSTOM_OPTS="--vm 1 --vm-bytes 10M"
+    run timeout 2 bash "$script_path" 2>/dev/null || true
+    rm -f "$script_path"
+    [[ "$output" == *"STRESS_NG_CUSTOM_OPTS is set"* ]]
+    [[ "$output" == *"CUSTOM-OPTS branch"* ]]
+}
+
+@test "WL: CUSTOM-OPTS set but IDLE cycle still sleeps (no custom run)" {
+    local script_path
+    script_path=$(_extract_stress_script)
+    export STRESS_NG_CUSTOM_OPTS="--vm 1 --vm-bytes 10M --vm-hang 0"
+    export CPU_ACTIVE_PROBABILITY=0 MEM_ACTIVE_PROBABILITY=0 DURATION_MIN=1 DURATION_MAX=1
+    run timeout 4 bash "$script_path" 2>/dev/null || true
+    rm -f "$script_path"
+    [[ "$output" == *"IDLE - Sleeping"* ]]
+    # When IDLE we never run the custom stress-ng; cycle line is IDLE not CUSTOM-OPTS
+    [[ "$output" != *"Cycle 1: CUSTOM-OPTS"* ]]
+}
+
+@test "WL: CUSTOM-OPTS unset uses normal CPU-only branch" {
+    local script_path
+    script_path=$(_extract_stress_script)
+    unset STRESS_NG_CUSTOM_OPTS
+    export CPU_ACTIVE_PROBABILITY=100 MEM_ACTIVE_PROBABILITY=0 DURATION_MIN=1 DURATION_MAX=1
+    run timeout 5 bash "$script_path" 2>/dev/null || true
+    rm -f "$script_path"
+    [[ "$output" == *"CPU only"* ]]
+    [[ "$output" != *"CUSTOM-OPTS"* ]]
+}
