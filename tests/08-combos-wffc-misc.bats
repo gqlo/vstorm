@@ -44,7 +44,7 @@ setup_file() {
 
 # ---------------------------------------------------------------
 # COMBO-44: WFFC + --dv-url (auto-detected RWO)
-# Note: explicit --rwo would skip detect_access_mode() entirely,
+# Note: explicit --access-mode=ReadWriteOnce would skip detect_access_mode() entirely,
 #       bypassing WFFC detection. So we let the mock auto-detect.
 # ---------------------------------------------------------------
 @test "combo-wffc: dv-url with WFFC storage (auto-detected RWO)" {
@@ -107,7 +107,7 @@ setup_file() {
   export PATH="$mock_dir:$PATH"
 
   run bash "$VSTORM" -n --batch-id=cmb046 --datasource=rhel9 --storage-class=lvms-nvme-sc \
-    --snapshot --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --snapshot-class=my-snap --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
     --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"

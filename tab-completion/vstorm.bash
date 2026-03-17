@@ -8,13 +8,13 @@ _vstorm() {
 		-n -q -y -h
 		--help
 		--datasource= --dv-url= --storage-size= --storage-class=
-		--access-mode= --rwx --rwo
-		--snapshot-class= --snapshot --no-snapshot
+		--access-mode=
+		--snapshot-class= --no-snapshot
 		--pvc-base-name= --batch-id= --basename=
 		--cores= --memory= --request-memory= --request-cpu=
 		--vms= --vms-per-namespace= --namespaces=
 		--run-strategy=
-		--create-existing-vm --wait --nowait --start --stop
+		--create-existing-vm --wait --wait= --run-strategy=
 		--containerdisk --containerdisk=
 		--cloudinit= --custom-templates=
 		--profile --profile=

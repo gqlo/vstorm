@@ -16,10 +16,10 @@ setup_file() {
 # ===============================================================
 
 # ---------------------------------------------------------------
-# COMBO-1: --storage-class + --rwo + --no-snapshot
+# COMBO-1: --storage-class + --access-mode=ReadWriteOnce + --no-snapshot
 # ---------------------------------------------------------------
-@test "combo: storage-class + rwo + no-snapshot on DataSource clone" {
-  run bash "$VSTORM" -n --batch-id=cmb001 --datasource=rhel9 --storage-class=my-sc --rwo \
+@test "combo: storage-class + RWO + no-snapshot on DataSource clone" {
+  run bash "$VSTORM" -n --batch-id=cmb001 --datasource=rhel9 --storage-class=my-sc --access-mode=ReadWriteOnce \
     --no-snapshot --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -40,11 +40,11 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-2: --storage-class + --snapshot-class + --rwo
+# COMBO-2: --storage-class + --snapshot-class + --access-mode=ReadWriteOnce
 # ---------------------------------------------------------------
-@test "combo: storage-class + snapshot-class + rwo in snapshot path" {
+@test "combo: storage-class + snapshot-class + RWO in snapshot path" {
   run bash "$VSTORM" -n --batch-id=cmb002 --datasource=rhel9 --storage-class=my-rbd \
-    --snapshot-class=my-snap --rwo --vms=2 --namespaces=1
+    --snapshot-class=my-snap --access-mode=ReadWriteOnce --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Custom storage class ---
@@ -65,10 +65,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-3: --storage-class + --rwo + --dv-url
+# COMBO-3: --storage-class + --access-mode=ReadWriteOnce + --dv-url
 # ---------------------------------------------------------------
-@test "combo: storage-class + rwo + dv-url on URL import path" {
-  run bash "$VSTORM" -n --batch-id=cmb003 --storage-class=my-sc --rwo \
+@test "combo: storage-class + RWO + dv-url on URL import path" {
+  run bash "$VSTORM" -n --batch-id=cmb003 --storage-class=my-sc --access-mode=ReadWriteOnce \
     --dv-url=http://example.com/disk.qcow2 --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -128,7 +128,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: storage-size + snapshot on base DV and snapshot flow" {
   run bash "$VSTORM" -n --batch-id=cmb006 --datasource=rhel9 --storage-size=50Gi \
-    --snapshot --vms=1 --namespaces=1
+    --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Custom size on base DV ---
@@ -141,11 +141,11 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-7: --rwx + --dv-url + --snapshot
+# COMBO-7: --access-mode=ReadWriteMany + --dv-url + --snapshot
 # ---------------------------------------------------------------
-@test "combo: rwx + dv-url + snapshot" {
-  run bash "$VSTORM" -n --batch-id=cmb007 --datasource=rhel9 --rwx \
-    --dv-url=http://example.com/disk.qcow2 --snapshot --vms=2 --namespaces=1
+@test "combo: RWX + dv-url + snapshot" {
+  run bash "$VSTORM" -n --batch-id=cmb007 --datasource=rhel9 --access-mode=ReadWriteMany \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- RWX access mode ---
@@ -160,10 +160,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-8: --rwo + --storage-class + --no-snapshot + --storage-size
+# COMBO-8: --access-mode=ReadWriteOnce + --storage-class + --no-snapshot + --storage-size
 # ---------------------------------------------------------------
 @test "combo: all storage options on DataSource clone path" {
-  run bash "$VSTORM" -n --batch-id=cmb008 --datasource=rhel9 --rwo --storage-class=my-sc \
+  run bash "$VSTORM" -n --batch-id=cmb008 --datasource=rhel9 --access-mode=ReadWriteOnce --storage-class=my-sc \
     --no-snapshot --storage-size=50Gi --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -208,7 +208,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot + custom cloudinit" {
   run bash "$VSTORM" -n --batch-id=cmb010 --datasource=rhel9 \
-    --dv-url=http://example.com/disk.qcow2 --snapshot \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
     --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -280,7 +280,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot without cloudinit has no auto cloud-init" {
   run bash "$VSTORM" -n --batch-id=cmb013 --datasource=rhel9 \
-    --dv-url=http://example.com/disk.qcow2 --snapshot \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -327,7 +327,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: request-cpu + request-memory in snapshot path" {
   run bash "$VSTORM" -n --batch-id=cmb015 --datasource=rhel9 --request-cpu=2 --request-memory=4Gi \
-    --snapshot --vms=1 --namespaces=1
+    --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Resource requests in vm-snap.yaml output ---
@@ -365,7 +365,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: cores + memory + request-cpu + request-memory in snapshot path" {
   run bash "$VSTORM" -n --batch-id=cmb017 --datasource=rhel9 --cores=4 --memory=8Gi \
-    --request-cpu=2 --request-memory=4Gi --snapshot --vms=1 --namespaces=1
+    --request-cpu=2 --request-memory=4Gi --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- CPU/memory limits ---
@@ -407,10 +407,10 @@ setup_file() {
 # ===============================================================
 
 # ---------------------------------------------------------------
-# COMBO-19: --stop + --snapshot
+# COMBO-19: --run-strategy=Halted + --snapshot-class
 # ---------------------------------------------------------------
 @test "combo: stop + snapshot sets Halted in snapshot path" {
-  run bash "$VSTORM" -n --batch-id=cmb019 --datasource=rhel9 --stop --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb019 --datasource=rhel9 --run-strategy=Halted --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -420,10 +420,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-20: --stop + --dv-url + --no-snapshot
+# COMBO-20: --run-strategy=Halted + --dv-url + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: stop + dv-url + no-snapshot sets Halted in URL clone" {
-  run bash "$VSTORM" -n --batch-id=cmb020 --datasource=rhel9 --stop \
+  run bash "$VSTORM" -n --batch-id=cmb020 --datasource=rhel9 --run-strategy=Halted \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
@@ -434,10 +434,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-21: --start + --no-snapshot
+# COMBO-21: --run-strategy=Always + --no-snapshot
 # ---------------------------------------------------------------
 @test "combo: start + no-snapshot sets Always in DataSource clone" {
-  run bash "$VSTORM" -n --batch-id=cmb021 --datasource=rhel9 --start --no-snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb021 --datasource=rhel9 --run-strategy=Always --no-snapshot \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -450,7 +450,7 @@ setup_file() {
 # COMBO-22: --run-strategy=Manual + --snapshot
 # ---------------------------------------------------------------
 @test "combo: run-strategy Manual + snapshot" {
-  run bash "$VSTORM" -n --batch-id=cmb022 --datasource=rhel9 --run-strategy=Manual --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb022 --datasource=rhel9 --run-strategy=Manual --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 

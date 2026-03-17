@@ -44,7 +44,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace + namespaces + snapshot" {
   run bash "$VSTORM" -n --batch-id=cmb026 --datasource=rhel9 --vms-per-namespace=3 --namespaces=2 \
-    --snapshot
+    --snapshot-class=ocs-storagecluster-rbdplugin-snapclass
   [ "$status" -eq 0 ]
 
   # --- Total VMs = 3 * 2 = 6 ---
@@ -140,7 +140,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: basename + pvc-base-name + snapshot (both naming options)" {
   run bash "$VSTORM" -n --batch-id=cmb030 --datasource=rhel9 --basename=myvm \
-    --pvc-base-name=myvm-base --snapshot --vms=1 --namespaces=1
+    --pvc-base-name=myvm-base --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- VM name uses basename ---
@@ -160,7 +160,7 @@ setup_file() {
 # COMBO-31: --basename=myvm + --snapshot (default pvc-base-name)
 # ---------------------------------------------------------------
 @test "combo: basename + snapshot with default pvc-base-name" {
-  run bash "$VSTORM" -n --batch-id=cmb031 --datasource=rhel9 --basename=myvm --snapshot \
+  run bash "$VSTORM" -n --batch-id=cmb031 --datasource=rhel9 --basename=myvm --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -249,7 +249,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: basename + dv-url + snapshot" {
   run bash "$VSTORM" -n --batch-id=cmb034a --datasource=rhel9 --basename=myvm \
-    --dv-url=http://example.com/disk.qcow2 --snapshot \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -280,7 +280,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: dv-url + snapshot with default basename" {
   run bash "$VSTORM" -n --batch-id=cmb034b --datasource=rhel9 \
-    --dv-url=http://example.com/disk.qcow2 --snapshot \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -302,7 +302,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: basename + dv-url + snapshot + multiple namespaces" {
   run bash "$VSTORM" -n --batch-id=cmb034c --datasource=rhel9 --basename=myvm \
-    --dv-url=http://example.com/disk.qcow2 --snapshot \
+    --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass-class=ocs-storagecluster-rbdplugin-snapclass \
     --vms=4 --namespaces=2
   [ "$status" -eq 0 ]
 
@@ -400,10 +400,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-39: --stop + --wait (dry-run; Halted VMs won't run)
+# COMBO-39: --run-strategy=Halted + --wait (dry-run; Halted VMs won't run)
 # ---------------------------------------------------------------
-@test "combo: stop + wait accepted without error in dry-run" {
-  run bash "$VSTORM" -n --batch-id=cmb039 --datasource=rhel9 --stop --wait \
+@test "combo: run-strategy Halted + wait accepted without error in dry-run" {
+  run bash "$VSTORM" -n --batch-id=cmb039 --datasource=rhel9 --run-strategy=Halted --wait \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
@@ -431,26 +431,26 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# COMBO-41: --start + --stop (last one wins)
+# COMBO-41: --run-strategy=Always then Halted (last one wins)
 # ---------------------------------------------------------------
-@test "combo: start then stop — last flag wins" {
-  run bash "$VSTORM" -n --batch-id=cmb041 --datasource=rhel9 --start --stop \
+@test "combo: run-strategy Always then Halted — last wins" {
+  run bash "$VSTORM" -n --batch-id=cmb041 --datasource=rhel9 --run-strategy=Always --run-strategy=Halted \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
-  # --- --stop is last, so Halted ---
+  # --- --run-strategy=Halted is last ---
   [[ "$output" == *"runStrategy: Halted"* ]]
 }
 
 # ---------------------------------------------------------------
-# COMBO-42: --run-strategy=Halted + --start (start overrides)
+# COMBO-42: --run-strategy=Halted then Always (last wins)
 # ---------------------------------------------------------------
-@test "combo: run-strategy Halted then start — start overrides" {
-  run bash "$VSTORM" -n --batch-id=cmb042 --datasource=rhel9 --run-strategy=Halted --start \
+@test "combo: run-strategy Halted then Always — last wins" {
+  run bash "$VSTORM" -n --batch-id=cmb042 --datasource=rhel9 --run-strategy=Halted --run-strategy=Always \
     --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
-  # --- --start is last, so Always ---
+  # --- --run-strategy=Always is last ---
   [[ "$output" == *"runStrategy: Always"* ]]
 }
 

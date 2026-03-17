@@ -1,58 +1,154 @@
-# Grafana dashboard provisioning (dittybopper)
+# Monitoring (Grafana, Prometheus, CNV / descheduler)
 
-Provision Grafana dashboards from JSON files so they persist across pod restarts when using dittybopper.
+This directory holds **Grafana dashboards**, **Prometheus-related YAML**, and **helper scripts** for OpenShift / CNV and descheduler analysis.
 
-## Running the script with JSON files
+## Contents
 
-From the repo root (or with paths adjusted), run the script and pass one or more dashboard JSON files.
+- [Scripts](#scripts)
+
+### Persist your JSON dashboard in Dittybopper
+
+- [Persist your JSON dashboard in Dittybopper](#persist-your-json-dashboard-in-dittybopper)
+- [`dashboard/desched-cnv.json`](#dashboarddesched-cnvjson)
+- [Provisioning to dittybopper (persistent Grafana)](#provisioning-to-dittybopper-persistent-grafana)
+- [What provisioning does (overview)](#what-provisioning-does-overview)
+- [Prerequisites](#prerequisites)
+- [Step 1: Dashboard provider ConfigMap](#step-1-dashboard-provider-configmap)
+- [Step 2: Dashboard ConfigMap](#step-2-dashboard-configmap)
+- [Step 3: Mount volumes on dittybopper](#step-3-mount-volumes-on-dittybopper)
+- [Step 4: Verify](#step-4-verify)
+- [Adding more dashboards](#adding-more-dashboards)
+- [Troubleshooting](#troubleshooting)
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`scripts/provision-grafana-dashboards.sh`](scripts/provision-grafana-dashboards.sh) | Apply Grafana dashboard JSON to Dittybopper ([persist JSON dashboard](#persist-your-json-dashboard-in-dittybopper)). |
+| [`scripts/prom-query`](scripts/prom-query) | Run **PromQL** against in-cluster Prometheus; batch from YAML or inline. |
+| [`scripts/migration-stats.py`](scripts/migration-stats.py) | **VMIM** stats summary (evacuation / workload / migration counts, durations, running VMs). |
+| [`scripts/compute_euclidean_distance.py`](scripts/compute_euclidean_distance.py) | Post-process **CSV** from `prom-query` into ideal-point Euclidean distance. |
+
+### `prom-query`
+
+Runs queries through the Prometheus pod in `openshift-monitoring` (configurable).
+
+```bash
+# All queries in a YAML file → CSV under csv-data/ next to the YAML
+./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml
+
+# One named query
+./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml memory-per-worker
+
+# List query names
+./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml -l
+
+# Inline PromQL to stdout
+./monitoring/scripts/prom-query -s 1h -e now -S 5m 'up{job="kubelet"}'
+```
+
+Requires: `oc`, `python3`, **PyYAML** (`pip install pyyaml`).
+
+### `migration-stats.py`
+
+```bash
+# Default: summary only (all namespaces)
+python3 monitoring/scripts/migration-stats.py
+
+# CSV listing (type, workload, vmim name, seconds)
+python3 monitoring/scripts/migration-stats.py --csv
+python3 monitoring/scripts/migration-stats.py --namespace my-ns --output out.csv
+```
+
+Requires: `oc` logged into the cluster.
+
+### `compute_euclidean_distance.py`
+
+After generating the expected per-worker and avg CSVs with `prom-query`, run from repo root:
+
+```bash
+python3 monitoring/scripts/compute_euclidean_distance.py
+```
+
+Requires: **pandas**.
+
+---
+
+## YAML
+
+| File | Description |
+|------|-------------|
+| [`yaml/prom-queries.yaml`](yaml/prom-queries.yaml) | Named **PromQL** queries (memory/CPU per worker, averages, descheduler-style signals). Use with `prom-query`. |
+| [`yaml/prom-queries-descheduler-counts.yaml`](yaml/prom-queries-descheduler-counts.yaml) | Queries that **count** nodes above thresholds using **descheduler recording rule** series (`descheduler:*`). Requires those rules in the cluster. |
+| [`yaml/desched-rules.yaml`](yaml/desched-rules.yaml) | Reference export of **PrometheusRule** `descheduler-rules` (OpenShift kube-descheduler-operator): recording rules for utilization, pressure, deviations, ideal-point distance, etc. Pair with `prom-queries-descheduler-counts.yaml` and dashboards. |
+
+YAML format for `prom-query` (abbreviated):
+
+```yaml
+defaults:
+  start: "2026-02-24 19:10:37"
+  end: "2026-02-24 19:20:25"
+  step: 5s
+
+my-query-name:
+  description: "Human-readable label"
+  query: |
+    promql_here
+```
+
+CSVs are written under `csv-data/` beside the YAML file (one file per query name).
+
+---
+
+## Persist your JSON dashboard in Dittybopper
+
+Use the **provisioning script** below to keep dashboard JSON across pod restarts, or skip to [Prerequisites](#prerequisites) for **manual** setup and troubleshooting.
+
+### `dashboard/desched-cnv.json`
+
+Grafana dashboard for **descheduler / CNV** metrics (`description`: descheduler dashboard). Import in Grafana or provision with the script below.
+
+### Provisioning to dittybopper (persistent Grafana)
+
+Script: [`scripts/provision-grafana-dashboards.sh`](scripts/provision-grafana-dashboards.sh)
+
+From the **repo root** (adjust paths if needed):
 
 **Single dashboard (default namespace `dittybopper`):**
 
 ```bash
-./scripts/provision-grafana-dashboards.sh your-dashboard.json
+./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json
 ```
 
 **Multiple dashboards:**
 
 ```bash
-./scripts/provision-grafana-dashboards.sh your-dashboard.json other-dashboard.json
+./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json other-dashboard.json
 ```
 
 **Custom namespace:**
 
 ```bash
-./scripts/provision-grafana-dashboards.sh my-grafana-ns your-dashboard.json
+./monitoring/scripts/provision-grafana-dashboards.sh my-grafana-ns monitoring/dashboard/desched-cnv.json
 ```
 
-**Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); first argument is only treated as namespace if it does not end in `.json`. Script: [provision-grafana-dashboards.sh](../scripts/provision-grafana-dashboards.sh).
+**Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); the first argument is only treated as a namespace if it does **not** end in `.json`.
 
----
+#### What provisioning does (overview)
 
-## Explanation
+Dittybopper often does not mount ConfigMaps labeled `grafana_dashboard=1` by default. The script:
 
-Optional reading: what the script does, how it works, and manual/troubleshooting details.
+1. Creates a **dashboard provider** ConfigMap (`grafana-dashboards-provider`).
+2. Creates **`grafana-dashboards-default`** with your JSON file(s).
+3. **Patches** the dittybopper deployment to mount both into the Grafana container and rolls out.
 
 ### Prerequisites
 
-- `oc` CLI logged into the cluster
-- Dittybopper (Grafana) already deployed in a namespace (this doc uses `dittybopper` as the namespace; adjust if yours differs)
-- A dashboard JSON file (exported from Grafana or from a file)
+- `oc` logged into the cluster
+- Dittybopper (Grafana) deployed (this doc uses namespace `dittybopper`; adjust if yours differs)
+- Dashboard JSON (e.g. from `dashboard/` or exported from Grafana)
 
-### What it does / Overview
-
-Dittybopper’s deployment does not mount ConfigMaps labeled `grafana_dashboard=1` by default. To make dashboards persistent you must:
-
-1. Create a **dashboard provider** ConfigMap so Grafana knows where to load dashboards from.
-2. Create a **dashboard** ConfigMap with your dashboard JSON (or multiple JSON files in one ConfigMap named `grafana-dashboards-default`).
-3. **Patch the dittybopper deployment** to mount both ConfigMaps into the Grafana container.
-
-The script performs all of these steps (and rollout) for you when you pass a namespace and optional JSON files. The sections below describe each step in detail for manual setup or reference.
-
----
-
-### Step 1: Create the dashboard provider ConfigMap
-
-This tells Grafana to load dashboard JSON files from a specific path inside the container.
+### Step 1: Dashboard provider ConfigMap
 
 ```bash
 oc apply -f - << 'EOF'
@@ -74,59 +170,25 @@ data:
 EOF
 ```
 
-Use your actual namespace in place of `dittybopper` if different.
+### Step 2: Dashboard ConfigMap
 
----
-
-### Step 2: Export and create the dashboard ConfigMap
-
-### 2a. Export the dashboard from Grafana (if needed)
-
-1. Open Grafana in the browser and go to the dashboard you want to keep.
-2. Use **Share dashboard** (or the ⋮ menu) → **Export**.
-3. Choose **Export for sharing externally** (or “Save to file”).
-4. Save the file locally (e.g. `my-dashboard.json`).
-
-### 2b. Create a ConfigMap from the JSON file(s)
-
-The script uses a single ConfigMap named `grafana-dashboards-default` and can include multiple JSON files (each becomes a key in the ConfigMap). To do the same manually, from the directory where the JSON file(s) are:
-
-```bash
-# Single file; replace my-dashboard.json with your file. Use grafana-dashboards-default to match the script.
-oc create configmap grafana-dashboards-default \
-  --from-file=my-dashboard.json \
-  -n dittybopper
-```
-
-Multiple dashboards (script behavior):
+Export from Grafana (**Share** → **Export**) if needed, then:
 
 ```bash
 oc create configmap grafana-dashboards-default \
-  --from-file=dashboard1.json --from-file=dashboard2.json \
+  --from-file=desched-cnv.json=monitoring/dashboard/desched-cnv.json \
   -n dittybopper
 ```
 
-To force a key to be `dashboard.json` (some setups expect this name):
-
-```bash
-oc create configmap grafana-dashboards-default \
-  --from-file=dashboard.json=my-dashboard.json \
-  -n dittybopper
-```
-
-Optional: add the label `grafana_dashboard=1` for consistency with other setups (dittybopper does not use it for mounting; the mount is done in Step 3):
+Multiple files: add more `--from-file=...` arguments. Optional label:
 
 ```bash
 oc label configmap grafana-dashboards-default grafana_dashboard=1 -n dittybopper
 ```
 
----
+### Step 3: Mount volumes on dittybopper
 
-### Step 3: Mount the ConfigMaps in the dittybopper deployment
-
-Add two volumes to the Grafana container so it sees the provider config and the dashboard JSON.
-
-**Provider config** (so Grafana reads `dashboards.yaml`):
+**Provider:**
 
 ```bash
 oc set volume deployment/dittybopper -n dittybopper \
@@ -138,7 +200,7 @@ oc set volume deployment/dittybopper -n dittybopper \
   -c dittybopper
 ```
 
-**Dashboard ConfigMap** (so Grafana sees your JSON under the path configured in the provider). The script uses the name `grafana-dashboards-default`:
+**Dashboards:**
 
 ```bash
 oc set volume deployment/dittybopper -n dittybopper \
@@ -150,57 +212,33 @@ oc set volume deployment/dittybopper -n dittybopper \
   -c dittybopper
 ```
 
-If you created a ConfigMap with a different name in Step 2, use that name for `--name` and `--configmap-name`. When the script updates the dashboards ConfigMap, it restarts the deployment so the pod picks up the new JSON.
-
-Wait for the rollout to finish:
-
 ```bash
 oc rollout status deployment/dittybopper -n dittybopper --timeout=120s
 ```
 
----
-
 ### Step 4: Verify
 
-1. Open Grafana and go to **Dashboards** (or **Explore**).
-2. The provisioned dashboard should appear (title comes from the dashboard JSON).
-3. Restart the pod and confirm the dashboard is still there:
-
-   ```bash
-   oc rollout restart deployment/dittybopper -n dittybopper
-   oc rollout status deployment/dittybopper -n dittybopper --timeout=120s
-   ```
-
-Optional: confirm files inside the container:
+Open Grafana → **Dashboards**. After pod restart, dashboards should still appear if mounts are correct:
 
 ```bash
-oc exec -n dittybopper deployment/dittybopper -c dittybopper -- \
-  ls -la /etc/grafana/provisioning/dashboards/
+oc rollout restart deployment/dittybopper -n dittybopper
+oc rollout status deployment/dittybopper -n dittybopper --timeout=120s
+```
+
+```bash
 oc exec -n dittybopper deployment/dittybopper -c dittybopper -- \
   ls -la /etc/grafana/provisioning/dashboards/default/
 ```
 
-You should see `dashboards.yaml` and, under `default/`, your JSON file(s).
-
----
-
 ### Adding more dashboards
 
-- **Using the script:** Re-run the script with the same namespace and **all** dashboard JSON files you want (e.g. `./provision-grafana-dashboards.sh dittybopper dash1.json dash2.json new-dash.json`). The script replaces the `grafana-dashboards-default` ConfigMap with one containing every file you pass and restarts the deployment.
-- **Manual (same ConfigMap):** Add another key to the `grafana-dashboards-default` ConfigMap and re-apply, then restart the deployment so the new file is mounted.
-- **Manual (separate ConfigMap):** Create a new ConfigMap and add a second volume mounting it into a new folder under provisioning, and extend `dashboards.yaml` with another provider for that path.
-
----
+- **Script:** Re-run with **all** JSON files you want in one ConfigMap (script replaces `grafana-dashboards-default`).
+- **Manual:** Add keys to the ConfigMap and restart the deployment.
 
 ### Troubleshooting
 
-- **Dashboard does not appear after Step 3**  
-  - Check that the JSON is valid and is the format Grafana expects (e.g. export from Grafana and use that file).  
-  - Check Grafana logs: `oc logs -n dittybopper deployment/dittybopper -c dittybopper --tail=100` for provisioning or parsing errors.
-
-- **Dashboard disappears after a few minutes**  
-  - Without the mounts in Step 3, dashboards live only in the pod. Ensure both volumes are present:  
-    `oc get deployment dittybopper -n dittybopper -o jsonpath='{.spec.template.spec.volumes[*].name}'`
-
-- **Wrong namespace**  
-  - Replace `dittybopper` in all commands with your Grafana/dittybopper namespace.
+- **Dashboard missing:** Validate JSON; check Grafana logs:  
+  `oc logs -n dittybopper deployment/dittybopper -c dittybopper --tail=100`
+- **Dashboard disappears:** Ensure both provider and dashboard volumes are on the deployment:  
+  `oc get deployment dittybopper -n dittybopper -o jsonpath='{.spec.template.spec.volumes[*].name}'`
+- **Wrong namespace:** Replace `dittybopper` everywhere with your Grafana namespace.
