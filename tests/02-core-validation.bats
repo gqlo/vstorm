@@ -201,7 +201,7 @@ setup_file() {
   cp templates/volumesnap.yaml "$tmpdir/"
   cp templates/vm-snap.yaml "$tmpdir/"
   run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err018 \
-    --vms=1 --namespaces=1 --snapshot
+    --vms=1 --namespaces=1 --snapshot-class=my-snap
   [ "$status" -ne 0 ]
   [[ "$output" == *"No dv template found"* ]]
   rm -rf "$tmpdir"
@@ -232,7 +232,7 @@ setup_file() {
   cp templates/volumesnap.yaml "$tmpdir/"
   cp templates/dv-datasource.yaml "$tmpdir/"
   run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=err020 \
-    --vms=1 --namespaces=1 --snapshot
+    --vms=1 --namespaces=1 --snapshot-class=my-snap
   [ "$status" -ne 0 ]
   [[ "$output" == *"No vm template found"* ]]
   rm -rf "$tmpdir"
@@ -268,44 +268,44 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# ERR-16: --snapshot then --no-snapshot (last wins = no-snapshot)
+# ERR-16: --snapshot-class then --no-snapshot (last wins = no-snapshot)
 # ---------------------------------------------------------------
-@test "ERR: --snapshot then --no-snapshot uses no-snapshot mode" {
+@test "ERR: --snapshot-class then --no-snapshot uses no-snapshot mode" {
   run bash "$VSTORM" -n --batch-id=err023 --vms=2 --namespaces=1 \
-    --snapshot --no-snapshot
+    --snapshot-class=my-snap --no-snapshot
   [ "$status" -eq 0 ]
   [[ "$output" != *"Creating VolumeSnapshots"* ]]
   [[ "$output" != *"kind: VolumeSnapshot"* ]]
 }
 
 # ---------------------------------------------------------------
-# ERR-17: --no-snapshot then --snapshot (last wins = snapshot)
+# ERR-17: --no-snapshot then --snapshot-class (last wins = snapshot)
 # ---------------------------------------------------------------
-@test "ERR: --no-snapshot then --snapshot uses snapshot mode" {
+@test "ERR: --no-snapshot then --snapshot-class uses snapshot mode" {
   run bash "$VSTORM" -n --batch-id=err024 --vms=2 --namespaces=1 \
-    --no-snapshot --snapshot
+    --no-snapshot --snapshot-class=my-snap
   [ "$status" -eq 0 ]
   [[ "$output" == *"Creating VolumeSnapshots"* ]]
   [[ "$output" == *"kind: VolumeSnapshot"* ]]
 }
 
 # ---------------------------------------------------------------
-# ERR-18: --rwo then --rwx (last wins = ReadWriteMany)
+# ERR-18: --access-mode=ReadWriteOnce then ReadWriteMany (last wins = ReadWriteMany)
 # ---------------------------------------------------------------
-@test "ERR: --rwo then --rwx uses ReadWriteMany" {
+@test "ERR: --access-mode RWO then RWX uses ReadWriteMany" {
   run bash "$VSTORM" -n --batch-id=err025 --vms=1 --namespaces=1 \
-    --rwo --rwx
+    --access-mode=ReadWriteOnce --access-mode=ReadWriteMany
   [ "$status" -eq 0 ]
   [[ "$output" == *"ReadWriteMany"* ]]
   [[ "$output" != *"ReadWriteOnce"* ]]
 }
 
 # ---------------------------------------------------------------
-# ERR-19: --rwx then --rwo (last wins = ReadWriteOnce)
+# ERR-19: --access-mode=ReadWriteMany then ReadWriteOnce (last wins = ReadWriteOnce)
 # ---------------------------------------------------------------
-@test "ERR: --rwx then --rwo uses ReadWriteOnce" {
+@test "ERR: --access-mode RWX then RWO uses ReadWriteOnce" {
   run bash "$VSTORM" -n --batch-id=err026 --vms=1 --namespaces=1 \
-    --rwx --rwo
+    --access-mode=ReadWriteMany --access-mode=ReadWriteOnce
   [ "$status" -eq 0 ]
   [[ "$output" == *"ReadWriteOnce"* ]]
 }
@@ -338,6 +338,35 @@ setup_file() {
   run bash "$VSTORM" -n --batch-id=err029 --namespaces=-1 --vms=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"Number of namespaces must be a positive integer"* ]]
+}
+
+# ---------------------------------------------------------------
+# ERR-22a: invalid --run-strategy rejected
+# ---------------------------------------------------------------
+@test "ERR: invalid --run-strategy rejected" {
+  run bash "$VSTORM" -n --batch-id=err029a --run-strategy=Invalid --vms=1 --namespaces=1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --run-strategy 'Invalid'"* ]]
+  [[ "$output" == *"Always, Halted, Manual, RerunOnFailure"* ]]
+}
+
+# ---------------------------------------------------------------
+# ERR-22b: invalid --wait value rejected
+# ---------------------------------------------------------------
+@test "ERR: invalid --wait value rejected" {
+  run bash "$VSTORM" -n --batch-id=err029b --wait=maybe --vms=1 --namespaces=1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --wait value 'maybe'"* ]]
+}
+
+# ---------------------------------------------------------------
+# ERR-22c: invalid --access-mode rejected
+# ---------------------------------------------------------------
+@test "ERR: invalid --access-mode rejected" {
+  run bash "$VSTORM" -n --batch-id=err029c --access-mode=ReadWriteX --vms=1 --namespaces=1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --access-mode 'ReadWriteX'"* ]]
+  [[ "$output" == *"ReadWriteOnce, ReadWriteMany, ReadOnlyMany"* ]]
 }
 
 # ---------------------------------------------------------------

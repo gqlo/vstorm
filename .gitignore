@@ -1,5 +1,6 @@
 logs/
 tmp/
 rh-internal-doc/
-.cursor/debug.log
+# Cursor/app debug logs (e.g. debug-b8567b.log); project logs go in logs/
+.cursor/debug*.log
 monitoring/csv-data/

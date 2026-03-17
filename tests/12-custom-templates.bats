@@ -126,7 +126,7 @@ setup_file() {
   tmpdir=$(mktemp -d)
   cp templates/vm-snap.yaml "$tmpdir/custom-vm.yaml"
   run bash "$VSTORM" -n --custom-templates="$tmpdir" \
-    --batch-id=ct0006 --vms=2 --namespaces=1 --snapshot
+    --batch-id=ct0006 --vms=2 --namespaces=1 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass
   [ "$status" -eq 0 ]
 
   # Built-in templates used for Namespace, DV, VolumeSnapshot
@@ -166,7 +166,7 @@ setup_file() {
   cp templates/dv-datasource.yaml "$tmpdir/"
   # No volumesnap.yaml -- should fail
   run env CREATE_VM_PATH="$tmpdir" bash "$VSTORM" -n --batch-id=ct0008 \
-    --vms=1 --namespaces=1 --snapshot
+    --vms=1 --namespaces=1 --snapshot-class=my-snap
   [ "$status" -ne 0 ]
   [[ "$output" == *"No volumesnapshot template found"* ]]
   rm -rf "$tmpdir"

@@ -141,7 +141,7 @@ setup_file() {
 # DC-7: Snapshot mode + DataSource still creates base DV
 # ---------------------------------------------------------------
 @test "datasource-clone: snapshot mode still creates base DV" {
-  run bash "$VSTORM" -n --batch-id=dc0007 --datasource=rhel9 --snapshot --vms=2 --namespaces=1
+  run bash "$VSTORM" -n --batch-id=dc0007 --datasource=rhel9 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Base DV IS created ---
@@ -160,8 +160,8 @@ setup_file() {
 # ---------------------------------------------------------------
 # DC-8: Access mode applies to inline DV in vm-datasource.yaml
 # ---------------------------------------------------------------
-@test "datasource-clone: --rwo access mode on inline DV" {
-  run bash "$VSTORM" -n --batch-id=dc0008 --datasource=rhel9 --no-snapshot --rwo --vms=1 --namespaces=1
+@test "datasource-clone: --access-mode=ReadWriteOnce on inline DV" {
+  run bash "$VSTORM" -n --batch-id=dc0008 --datasource=rhel9 --no-snapshot --access-mode=ReadWriteOnce --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Access mode in summary ---
@@ -199,10 +199,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# DC-10: --stop with direct DataSource clone
+# DC-10: --run-strategy=Halted with direct DataSource clone
 # ---------------------------------------------------------------
-@test "datasource-clone: --stop sets Halted runStrategy" {
-  run bash "$VSTORM" -n --batch-id=dc0010 --datasource=rhel9 --no-snapshot --stop --vms=1 --namespaces=1
+@test "datasource-clone: --run-strategy=Halted sets Halted runStrategy" {
+  run bash "$VSTORM" -n --batch-id=dc0010 --datasource=rhel9 --no-snapshot --run-strategy=Halted --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Halted"* ]]
@@ -271,11 +271,11 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AD-3: custom storage-class + explicit --snapshot overrides
+# AD-3: custom storage-class + explicit --snapshot-class keeps snapshots
 # ---------------------------------------------------------------
-@test "auto-detect: custom storage-class with explicit --snapshot keeps snapshots" {
+@test "auto-detect: custom storage-class with explicit --snapshot-class keeps snapshots" {
   run bash "$VSTORM" -n --batch-id=auto03 --datasource=rhel9 --storage-class=my-ceph-sc \
-    --snapshot --vms=2 --namespaces=1
+    --snapshot-class=my-snap --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Snapshot mode enabled (explicit override) ---
@@ -302,7 +302,7 @@ setup_file() {
 }
 
 # ===============================================================
-# Access mode options (--access-mode, --rwo, --rwx)
+# Access mode options (--access-mode)
 # ===============================================================
 
 # ---------------------------------------------------------------
@@ -317,10 +317,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AM-2: --rwo shortcut sets ReadWriteOnce on all resources
+# AM-2: --access-mode=ReadWriteOnce sets RWO on all resources
 # ---------------------------------------------------------------
-@test "access-mode: --rwo sets ReadWriteOnce on DV and VM" {
-  run bash "$VSTORM" -n --batch-id=am0002 --datasource=rhel9 --rwo --no-snapshot --vms=1 --namespaces=1
+@test "access-mode: --access-mode=ReadWriteOnce sets RWO on DV and VM" {
+  run bash "$VSTORM" -n --batch-id=am0002 --datasource=rhel9 --access-mode=ReadWriteOnce --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
@@ -329,7 +329,7 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AM-3: --access-mode=ReadWriteOnce
+# AM-3: --access-mode=ReadWriteOnce (explicit)
 # ---------------------------------------------------------------
 @test "access-mode: --access-mode=ReadWriteOnce" {
   run bash "$VSTORM" -n --batch-id=am0003 --datasource=rhel9 --access-mode=ReadWriteOnce --no-snapshot --vms=1 --namespaces=1
@@ -341,10 +341,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AM-4: --rwx shortcut sets ReadWriteMany
+# AM-4: --access-mode=ReadWriteMany
 # ---------------------------------------------------------------
-@test "access-mode: --rwx sets ReadWriteMany" {
-  run bash "$VSTORM" -n --batch-id=am0004 --datasource=rhel9 --rwx --vms=1 --namespaces=1
+@test "access-mode: --access-mode=ReadWriteMany" {
+  run bash "$VSTORM" -n --batch-id=am0004 --datasource=rhel9 --access-mode=ReadWriteMany --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteMany"* ]]
@@ -352,10 +352,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AM-5: --rwo with snapshot mode (VMs also get RWO)
+# AM-5: --access-mode=ReadWriteOnce with snapshot mode
 # ---------------------------------------------------------------
-@test "access-mode: --rwo applies to snapshot-based VMs too" {
-  run bash "$VSTORM" -n --batch-id=am0005 --datasource=rhel9 --rwo --snapshot --vms=2 --namespaces=1
+@test "access-mode: RWO applies to snapshot-based VMs too" {
+  run bash "$VSTORM" -n --batch-id=am0005 --datasource=rhel9 --access-mode=ReadWriteOnce --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
@@ -364,10 +364,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# AM-6: --rwo with URL import mode
+# AM-6: --access-mode=ReadWriteOnce with URL import mode
 # ---------------------------------------------------------------
-@test "access-mode: --rwo with URL import" {
-  run bash "$VSTORM" -n --batch-id=am0006 --rwo --no-snapshot --vms=1 --namespaces=1 \
+@test "access-mode: RWO with URL import" {
+  run bash "$VSTORM" -n --batch-id=am0006 --access-mode=ReadWriteOnce --no-snapshot --vms=1 --namespaces=1 \
     --dv-url=http://example.com/disk.qcow2
   [ "$status" -eq 0 ]
 

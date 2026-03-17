@@ -10,4 +10,5 @@ All debug logs for this project **must** go in the **`logs/`** folder, **never**
 - When adding instrumentation, writing, or referring to debug output (including Cursor/agent debug session logs), use paths under **`logs/`** (e.g. `logs/debug-*.log`, `logs/cursor-*.log`).
 - **Do not** put debug logs under `.cursor/`, in the project root, in `tmp/`, or other ad-hoc locations.
 - If the system provisions a log path under `.cursor/`, treat this rule as overriding it: use `logs/` instead (e.g. `logs/debug-<session-id>.log`).
+- **Never** write or configure logging to `.cursor/` (e.g. `.cursor/debug-b8567b.log`). That path is ignored in `.gitignore`; all logs belong under `logs/`.
 - The `logs/` directory is already used at runtime for batch manifests and run logs; keep all debug logs there for a single place to inspect and (if desired) gitignore.

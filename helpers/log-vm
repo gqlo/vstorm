@@ -102,17 +102,22 @@ if [[ -z "$(type -t sshpass)" ]]; then
     fatal "sshpass is required (e.g. dnf install sshpass)"
 fi
 
+# Avoid "Too many authentication failures": skip pubkey so server MaxAuthTries isn't exhausted before password
 if $SSH_ONLY; then
     exec sshpass -p "$PASSWORD" virtctl ssh -n "$NS" \
         --local-ssh-opts="-o StrictHostKeyChecking=no" \
         --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
         --local-ssh-opts="-o ConnectTimeout=10" \
+        --local-ssh-opts="-o PubkeyAuthentication=no" \
+        --local-ssh-opts="-o PasswordAuthentication=yes" \
         root@vmi/"$VM"
 else
     sshpass -p "$PASSWORD" virtctl ssh -n "$NS" \
         --local-ssh-opts="-o StrictHostKeyChecking=no" \
         --local-ssh-opts="-o UserKnownHostsFile=/dev/null" \
         --local-ssh-opts="-o ConnectTimeout=10" \
+        --local-ssh-opts="-o PubkeyAuthentication=no" \
+        --local-ssh-opts="-o PasswordAuthentication=yes" \
         root@vmi/"$VM" --command "\
         echo '=== cloud-init status ==='; cloud-init status --long; echo ''; \
         echo '=== cloud-init-output.log (tail -n $LINES) ==='; tail -n $LINES /var/log/cloud-init-output.log; echo ''; \

@@ -80,9 +80,9 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# SP-4: explicit --rwo overrides StorageProfile that says RWX
+# SP-4: explicit --access-mode=ReadWriteOnce overrides StorageProfile that says RWX
 # ---------------------------------------------------------------
-@test "auto-detect: explicit --rwo overrides StorageProfile RWX" {
+@test "auto-detect: explicit --access-mode=ReadWriteOnce overrides StorageProfile RWX" {
   local mock_dir
   mock_dir=$(mktemp -d)
   _create_mock_oc "$mock_dir"
@@ -90,7 +90,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteMany
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VSTORM" -n --batch-id=sp0004 --datasource=rhel9 --rwo --storage-class=ocs-rbd-virt \
+  run bash "$VSTORM" -n --batch-id=sp0004 --datasource=rhel9 --access-mode=ReadWriteOnce --storage-class=ocs-rbd-virt \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -103,9 +103,9 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# SP-5: explicit --rwx overrides StorageProfile that says RWO
+# SP-5: explicit --access-mode=ReadWriteMany overrides StorageProfile that says RWO
 # ---------------------------------------------------------------
-@test "auto-detect: explicit --rwx overrides StorageProfile RWO" {
+@test "auto-detect: explicit --access-mode=ReadWriteMany overrides StorageProfile RWO" {
   local mock_dir
   mock_dir=$(mktemp -d)
   _create_mock_oc "$mock_dir"
@@ -113,7 +113,7 @@ setup_file() {
   export MOCK_ACCESS_MODE=ReadWriteOnce
   export PATH="$mock_dir:$PATH"
 
-  run bash "$VSTORM" -n --batch-id=sp0005 --datasource=rhel9 --rwx --storage-class=lvms-nvme-sc \
+  run bash "$VSTORM" -n --batch-id=sp0005 --datasource=rhel9 --access-mode=ReadWriteMany --storage-class=lvms-nvme-sc \
     --no-snapshot --vms=1 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -203,7 +203,7 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# WFFC-4: WFFC + explicit --snapshot → auto-disables snapshots
+# WFFC-4: WFFC + explicit --snapshot-class → auto-disables snapshots
 # ---------------------------------------------------------------
 @test "wffc: snapshot mode auto-disabled for WFFC storage" {
   local mock_dir
@@ -215,7 +215,7 @@ setup_file() {
   export PATH="$mock_dir:$PATH"
 
   run bash "$VSTORM" -n --batch-id=wf0004 --datasource=rhel9 --storage-class=lvms-nvme-sc \
-    --snapshot --vms=2 --namespaces=1
+    --snapshot-class=my-snap --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
   rm -f logs/wf0004-dryrun.yaml
@@ -264,7 +264,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "option: --pvc-base-name changes VolumeSnapshot PVC source" {
   run bash "$VSTORM" -n --batch-id=opt001 --datasource=rhel9 --pvc-base-name=custom-base \
-    --snapshot --vms=1 --namespaces=1
+    --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- VolumeSnapshot references the custom PVC name ---
@@ -349,10 +349,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# OPT-7: --start sets runStrategy to Always
+# OPT-7: --run-strategy=Always sets runStrategy to Always
 # ---------------------------------------------------------------
-@test "option: --start sets runStrategy to Always" {
-  run bash "$VSTORM" -n --batch-id=opt007 --datasource=rhel9 --start --vms=1 --namespaces=1
+@test "option: --run-strategy=Always sets runStrategy to Always" {
+  run bash "$VSTORM" -n --batch-id=opt007 --datasource=rhel9 --run-strategy=Always --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Always"* ]]
@@ -370,10 +370,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# OPT-9: --nowait is accepted (dry-run does not wait by default)
+# OPT-9: --wait=false is accepted (dry-run does not wait by default)
 # ---------------------------------------------------------------
-@test "option: --nowait is accepted without error" {
-  run bash "$VSTORM" -n --batch-id=opt009 --datasource=rhel9 --nowait --vms=1 --namespaces=1
+@test "option: --wait=false is accepted without error" {
+  run bash "$VSTORM" -n --batch-id=opt009 --datasource=rhel9 --wait=false --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"kind: VirtualMachine"* ]]

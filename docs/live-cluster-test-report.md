@@ -28,7 +28,7 @@
 | 9 | `--storage-class=... --snapshot-class=... --vms=3 --namespaces=2` | 3 | -- | -- | pending |
 | 10 | `--vms-per-namespace=5 --namespaces=3 --wait` | 15 | -- | -- | pending |
 | 11 | `--containerdisk --cloudinit=... --vms=3 --namespaces=2` | 3 | -- | -- | pending |
-| 12 | `--stop --vms=3 --namespaces=1` | 3 | -- | -- | pending |
+| 12 | `--run-strategy=Halted --vms=3 --namespaces=1` | 3 | -- | -- | pending |
 | 13 | `--cores=2 --memory=4Gi --request-cpu=500m --request-memory=2Gi --vms=3` | 3 | -- | -- | pending |
 | 14 | `--basename=perf-vm --storage-size=50Gi --vms=3 --namespaces=1` | 3 | -- | -- | pending |
 | 15 | `--profile --vms=10 --namespaces=2` | 10 | -- | -- | pending |
@@ -333,14 +333,14 @@ on a live cluster and fill in the "Options verified" tables with results.
 **Command:**
 
 ```bash
-./vstorm --stop --vms=3 --namespaces=1
+./vstorm --run-strategy=Halted --vms=3 --namespaces=1
 ```
 
 ### Options verified -- Test 12
 
 | Option | Expected | Verified |
 |---|---|---|
-| `--stop` | `runStrategy: Halted` on all VMs | |
+| `--run-strategy=Halted` | `runStrategy: Halted` on all VMs | |
 | No VMI | No VirtualMachineInstance created (VMs not started) | |
 | `--vms=3` | 3 VMs created | |
 | `--namespaces=1` | 1 namespace | |

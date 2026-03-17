@@ -85,10 +85,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# --stop sets run strategy to Halted
+# --run-strategy=Halted sets run strategy to Halted
 # ---------------------------------------------------------------
-@test "--stop sets runStrategy to Halted" {
-  run bash "$VSTORM" -n --batch-id=yaml04 --datasource=rhel9 --vms=1 --namespaces=1 --stop
+@test "--run-strategy=Halted sets runStrategy to Halted" {
+  run bash "$VSTORM" -n --batch-id=yaml04 --datasource=rhel9 --vms=1 --namespaces=1 --run-strategy=Halted
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"runStrategy: Halted"* ]]
@@ -273,10 +273,10 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# NS-7: --snapshot (default) still works as before
+# NS-7: --snapshot-class produces snapshot-based flow
 # ---------------------------------------------------------------
-@test "explicit --snapshot produces snapshot-based flow" {
-  run bash "$VSTORM" -n --batch-id=nosn07 --datasource=rhel9 --snapshot --vms=2 --namespaces=1
+@test "explicit --snapshot-class produces snapshot-based flow" {
+  run bash "$VSTORM" -n --batch-id=nosn07 --datasource=rhel9 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Snapshot mode enabled ---

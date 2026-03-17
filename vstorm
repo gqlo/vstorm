@@ -17,7 +17,7 @@ done
 # Configuration variables - modify these as needed
 DATASOURCE=
 DATASOURCE_NS="openshift-virtualization-os-images"
-DV_URL="http://d21-h25-000-r650.rdu2.scalelab.redhat.com:8088/rhel9-cloud-init.qcow"
+DV_URL="http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow"
 STORAGE_SIZE="32Gi"
 STORAGE_CLASS="ocs-storagecluster-ceph-rbd-virtualization"
 ACCESS_MODE="ReadWriteMany"
@@ -109,12 +109,8 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
                                 | | | --snapshot-class is also provided)
         --access-mode=MODE      PVC access mode (auto-detected from
                                 | | | StorageProfile; fallback: $ACCESS_MODE)
-                                | | | Shortcuts: --rwx, --rwo
-        --snapshot-class=class  Snapshot class ($SNAPSHOT_CLASS)
-                                | | | (implies --snapshot)
-        --snapshot              Use VolumeSnapshots for cloning (default
-                                | | | when using the built-in OCS storage class)
-        --no-snapshot           Clone VMs directly from PVC (no snapshot needed)
+        --snapshot-class=class  Snapshot class ($SNAPSHOT_CLASS); turns snapshot mode on
+        --no-snapshot           Clone VMs directly from PVC (no snapshot)
         --pvc-base-name=name    base PVC name ($BASE_PVC_NAME)
         --batch-id=ID           Batch ID for this run ($BATCH_ID)
                                 (auto-generated if not specified)
@@ -126,16 +122,11 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
         --vms=N                 Number of VMs ($NUM_VMS)
         --vms-per-namespace=N   Number of VMs per namespace (not set)
         --namespaces=N          Number of namespaces ($NUM_NAMESPACES)
-        --run-strategy=strategy Run strategy ($RUN_STRATEGY)
+        --run-strategy=strategy Run strategy ($RUN_STRATEGY; Always, Halted, Manual, RerunOnFailure)
         --create-existing-vm    Re-apply all VMs even if they already exist
                                 | | | Use with --batch-id to update an existing
                                 | | | batch (e.g. to resize CPU or memory)
-        --wait                  Wait for VMs to start
-        --nowait                Do not wait for VMs to start (default)
-        --start                 Start the VMs
-                                (equivalent to --run-strategy=Always)
-        --stop                  Do not start the VMs
-                                (equivalent to --run-strategy=Halted)
+        --wait[=true|false]     Wait for VMs to reach Running (default: false)
         --containerdisk[=IMAGE] Use a container disk image instead of PVC-backed
                                 | | | storage -- no storage class required.
                                 | | | Default image:
@@ -189,11 +180,8 @@ process_option() {
 	storagecl*) STORAGE_CLASS=$value; STORAGE_CLASS_SET=1 ;;
 	storagesi*|storage) STORAGE_SIZE=$value ;;
 	accessmod*|accessmode) ACCESS_MODE=$value; ACCESS_MODE_SET=1 ;;
-	rwx) ACCESS_MODE=ReadWriteMany; ACCESS_MODE_SET=1 ;;
-	rwo) ACCESS_MODE=ReadWriteOnce; ACCESS_MODE_SET=1 ;;
-	snapshotcl*) SNAPSHOT_CLASS=$value; SNAPSHOT_CLASS_SET=1 ;;
+	snapshotcl*) SNAPSHOT_CLASS=$value; SNAPSHOT_CLASS_SET=1; USE_SNAPSHOT=1; SNAPSHOT_EXPLICITLY_SET=1 ;;
 	nosnapshot) USE_SNAPSHOT=0; SNAPSHOT_EXPLICITLY_SET=1 ;;
-	snapshot) USE_SNAPSHOT=1; SNAPSHOT_EXPLICITLY_SET=1 ;;
 	pvc*)      BASE_PVC_NAME=$value; PVC_BASE_NAME_SET=1 ;;
 	base*)	   VM_BASENAME=$value; BASENAME_SET=1 ;;
 	core*)	   VM_CPU_CORES=$value ;;
@@ -204,15 +192,19 @@ process_option() {
 	vms*)	   NUM_VMS=$value ;;
 	namesp*)   NUM_NAMESPACES=$value ;;
 	runstrat*) RUN_STRATEGY=$value ;;
-	wait)	   WAIT=1 ;;
-	nowait)	   WAIT=0 ;;
+	wait)	   case "${value,,}" in
+		       '') WAIT=1 ;;  # --wait with no value
+		       0|1|true|false|yes|no|on|off) case "${value,,}" in
+		           0|false|no|off) WAIT=0 ;;
+		           *) WAIT=1 ;;
+		           esac ;;
+		       *) fatal "Invalid --wait value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
+		   esac ;;
 	cloudinit) CLOUDINIT_FILE=$value ;;
 	env)       GUEST_ENV_ARR+=("$value") ;;
 	containerdisk) CONTAINERDISK_IMAGE=${value:-quay.io/containerdisks/fedora:latest}
 		   DATASOURCE=; DV_URL= ;;
 	createex*) RECREATE_EXISTING_VMS=1 ;;
-	start)     RUN_STRATEGY=Always ;;
-	stop)      RUN_STRATEGY=Halted ;;
 	profile)   PROFILE_TARGET=${value:-all} ;;
 	customtemplate*) CREATE_VM_PATH=$value; CUSTOM_TEMPLATES_SET=1 ;;
 	*) 	   fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
@@ -325,6 +317,18 @@ if [[ -z "$DELETE_BATCH" ]] && (( ! DELETE_ALL )) ; then
     if ((NUM_VMS < NUM_NAMESPACES)) ; then
 	usage_error "Error: Number of VMs must be greater than or equal to number of namespaces"
     fi
+
+    case "$RUN_STRATEGY" in
+	Always|Halted|Manual|RerunOnFailure) ;;
+	*) usage_error "Invalid --run-strategy '$RUN_STRATEGY'; must be one of: Always, Halted, Manual, RerunOnFailure" ;;
+    esac
+
+    if ((ACCESS_MODE_SET)) ; then
+	case "$ACCESS_MODE" in
+	    ReadWriteOnce|ReadWriteMany|ReadOnlyMany) ;;
+	    *) usage_error "Invalid --access-mode '$ACCESS_MODE'; must be one of: ReadWriteOnce, ReadWriteMany, ReadOnlyMany" ;;
+	esac
+    fi
 fi
 
 # Setup logging
@@ -430,32 +434,33 @@ check_oc_connectivity() {
 	return "$rc"
 }
 
+# Ensure oc is installed and cluster is reachable. Exits with fatal if not.
+# Reused by check_prerequisites and by the delete path.
+ensure_oc_ready() {
+	if [[ -z "$(type -t oc)" ]] ; then
+		fatal "Error: oc command is not installed on system"
+	fi
+	local rc=0
+	check_oc_connectivity || rc=$?
+	if ((rc == 124)) ; then
+		fatal "Error: timed out reaching OpenShift cluster (${C_VAL}${OC_CONNECT_TIMEOUT:-30}s${C_RST}) -- check network connectivity"
+	elif ((rc != 0)) ; then
+		if [[ -n "${OC_WHOAMI_ERR:-}" ]] ; then
+			fatal "Error: ${OC_WHOAMI_ERR}"
+		else
+			fatal "Error: not logged into an OpenShift cluster (run 'oc login' first)"
+		fi
+	fi
+}
+
 # Check for prerequisites: oc CLI, OpenShift Virtualization,
 # ODF storage, and the configured storage class.
 # Reports all missing prerequisites before exiting.
 check_prerequisites() {
     local -i errors=0
 
-    if [[ -z "$(type -t oc)" ]] ; then
-	echo "${C_ERR}Error:${C_RST} oc command is not installed on system"
-	((errors++))
-    else
-	local rc=0
-	check_oc_connectivity || rc=$?
-	if ((rc == 124)) ; then
-	    echo "${C_ERR}Error:${C_RST} timed out reaching OpenShift cluster (${C_VAL}${OC_CONNECT_TIMEOUT:-30}s${C_RST}) -- check network connectivity"
-	    ((errors++))
-	elif ((rc != 0)) ; then
-	    if [[ -n "${OC_WHOAMI_ERR:-}" ]] ; then
-		echo "${C_ERR}Error:${C_RST} ${OC_WHOAMI_ERR}"
-	    else
-		echo "${C_ERR}Error:${C_RST} not logged into an OpenShift cluster (run 'oc login' first)"
-	    fi
-	    ((errors++))
-	fi
-    fi
+    ensure_oc_ready
 
-    if ((errors == 0)) ; then
 	if ! oc get ns openshift-cnv >/dev/null 2>&1 ; then
 	    echo "${C_ERR}Error:${C_RST} OpenShift Virtualization is not installed (openshift-cnv namespace not found)"
 	    ((errors++))
@@ -496,7 +501,6 @@ check_prerequisites() {
 		fi
 	    fi
 	fi
-    fi
 
     if ((errors > 0)) ; then
 	fatal "Prerequisite check failed with ${C_VAL}$errors${C_RST} error(s)"
@@ -521,7 +525,7 @@ check_prerequisites() {
 # use volumeMode: Block, we prefer the access mode from the Block
 # property set.  Falls back to the first listed access mode, then
 # to the existing ACCESS_MODE default.
-# Skipped when the user explicitly sets --access-mode/--rwo/--rwx.
+# Skipped when the user explicitly sets --access-mode.
 detect_access_mode() {
     if ((ACCESS_MODE_SET)) ; then
 	log_message "Access mode explicitly set to: ${C_VAL}$ACCESS_MODE${C_RST}"
@@ -1307,19 +1311,20 @@ delete_batch() {
         return 0
     fi
 
-    # Show what will be deleted
+    # Show what will be deleted (counts only, not full listing)
+    local ns_list ns_count vm_count
+    ns_list=$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1}') || true
+    [[ -z "$ns_list" ]] && ns_count=0 || ns_count=$(echo "$ns_list" | wc -l)
+    vm_count=$(oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null | wc -l) || true
+    vm_count=${vm_count:-0}
+
     echo "Resources for batch '$batch':"
     echo ""
-    echo "Namespaces:"
-    oc get ns -l batch-id="$batch" --no-headers 2>/dev/null || true
-    echo ""
-    echo "VirtualMachines:"
-    oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null || true
+    echo "Namespaces: $ns_count"
+    echo "VirtualMachines: $vm_count"
     echo ""
 
     # Check if anything exists
-    local ns_count
-    ns_count=$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | wc -l)
     if ((ns_count == 0)) ; then
         echo "No resources found for batch '$batch'"
         return 0
@@ -1333,7 +1338,7 @@ delete_batch() {
 	if [[ -n "$ns_name" && ! "$ns_name" =~ ^vm-[a-zA-Z0-9._-]+-ns-[0-9]+$ ]] ; then
 	    fatal "Refusing to delete namespace '$ns_name': does not match vstorm naming pattern (vm-{batch}-ns-{N})"
 	fi
-    done <<< "$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1}')"
+    done <<< "$ns_list"
 
     # Confirmation prompt (unless --yes or called from delete_all_batches)
     if (( ! CONFIRM_DELETE )) && [[ "$skip_confirm" != "skip-confirm" ]] ; then
@@ -1681,8 +1686,14 @@ main() {
 
 # Run delete or create
 if (( DELETE_ALL )) ; then
+    if ((doit)) ; then
+	ensure_oc_ready
+    fi
     delete_all_batches
 elif [[ -n "$DELETE_BATCH" ]] ; then
+    if ((doit)) ; then
+	ensure_oc_ready
+    fi
     delete_batch "$DELETE_BATCH"
 else
     if [[ -n "$PROFILE_TARGET" ]] ; then
