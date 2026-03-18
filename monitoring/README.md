@@ -4,30 +4,24 @@ This directory holds **Grafana dashboards**, **Prometheus-related YAML**, and **
 
 ## Contents
 
-- [Scripts](#scripts)
-
-### Persist your JSON dashboard in Dittybopper
-
-- [Persist your JSON dashboard in Dittybopper](#persist-your-json-dashboard-in-dittybopper)
-- [`dashboard/desched-cnv.json`](#dashboarddesched-cnvjson)
-- [Provisioning to dittybopper (persistent Grafana)](#provisioning-to-dittybopper-persistent-grafana)
-- [What provisioning does (overview)](#what-provisioning-does-overview)
-- [Prerequisites](#prerequisites)
-- [Step 1: Dashboard provider ConfigMap](#step-1-dashboard-provider-configmap)
-- [Step 2: Dashboard ConfigMap](#step-2-dashboard-configmap)
-- [Step 3: Mount volumes on dittybopper](#step-3-mount-volumes-on-dittybopper)
-- [Step 4: Verify](#step-4-verify)
-- [Adding more dashboards](#adding-more-dashboards)
+- [Persist your JSON dashboard in Dittybopper (provisioning to dittybopper)](#persist-your-json-dashboard-in-dittybopper-provisioning-to-dittybopper)
+- [Run Prometheus queries](#prom-query)
+- [Summarize migration stats](#migration-statspy)
+- [Compute Euclidean distance](#compute_euclidean_distancepy)
 - [Troubleshooting](#troubleshooting)
+- [Appendix](#appendix)
 
-## Scripts
+## Persist your JSON dashboard in Dittybopper (provisioning to dittybopper)
 
-| Script | Description |
-|--------|-------------|
-| [`scripts/provision-grafana-dashboards.sh`](scripts/provision-grafana-dashboards.sh) | Apply Grafana dashboard JSON to Dittybopper ([persist JSON dashboard](#persist-your-json-dashboard-in-dittybopper)). |
-| [`scripts/prom-query`](scripts/prom-query) | Run **PromQL** against in-cluster Prometheus; batch from YAML or inline. |
-| [`scripts/migration-stats.py`](scripts/migration-stats.py) | **VMIM** stats summary (evacuation / workload / migration counts, durations, running VMs). |
-| [`scripts/compute_euclidean_distance.py`](scripts/compute_euclidean_distance.py) | Post-process **CSV** from `prom-query` into ideal-point Euclidean distance. |
+Use the **provisioning script** below to persist dashboard JSON across pod restarts, or skip to [Prerequisites](#prerequisites) in the appendix for **manual** setup and troubleshooting.
+
+**Single dashboard (default namespace `dittybopper`):**
+
+```bash
+./scripts/provision-grafana-dashboards.sh path/to/your.json
+```
+
+**Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); the first argument is only treated as a namespace if it does **not** end in `.json`.
 
 ### `prom-query`
 
@@ -35,42 +29,36 @@ Runs queries through the Prometheus pod in `openshift-monitoring` (configurable)
 
 ```bash
 # All queries in a YAML file → CSV under csv-data/ next to the YAML
-./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml
+./scripts/prom-query yaml/prom-queries.yaml
 
 # One named query
-./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml memory-per-worker
+./scripts/prom-query yaml/prom-queries.yaml memory-per-worker
 
 # List query names
-./monitoring/scripts/prom-query monitoring/yaml/prom-queries.yaml -l
+./scripts/prom-query yaml/prom-queries.yaml -l
 
 # Inline PromQL to stdout
-./monitoring/scripts/prom-query -s 1h -e now -S 5m 'up{job="kubelet"}'
+./scripts/prom-query -s 1h -e now -S 5m 'up{job="kubelet"}'
 ```
-
-Requires: `oc`, `python3`, **PyYAML** (`pip install pyyaml`).
 
 ### `migration-stats.py`
 
 ```bash
 # Default: summary only (all namespaces)
-python3 monitoring/scripts/migration-stats.py
+python3 scripts/migration-stats.py
 
 # CSV listing (type, workload, vmim name, seconds)
-python3 monitoring/scripts/migration-stats.py --csv
-python3 monitoring/scripts/migration-stats.py --namespace my-ns --output out.csv
+python3 scripts/migration-stats.py --csv
+python3 scripts/migration-stats.py --namespace my-ns --output out.csv
 ```
-
-Requires: `oc` logged into the cluster.
 
 ### `compute_euclidean_distance.py`
 
 After generating the expected per-worker and avg CSVs with `prom-query`, run from repo root:
 
 ```bash
-python3 monitoring/scripts/compute_euclidean_distance.py
+python3 scripts/compute_euclidean_distance.py
 ```
-
-Requires: **pandas**.
 
 ---
 
@@ -100,39 +88,9 @@ CSVs are written under `csv-data/` beside the YAML file (one file per query name
 
 ---
 
-## Persist your JSON dashboard in Dittybopper
+## Appendix
 
-Use the **provisioning script** below to keep dashboard JSON across pod restarts, or skip to [Prerequisites](#prerequisites) for **manual** setup and troubleshooting.
-
-### `dashboard/desched-cnv.json`
-
-Grafana dashboard for **descheduler / CNV** metrics (`description`: descheduler dashboard). Import in Grafana or provision with the script below.
-
-### Provisioning to dittybopper (persistent Grafana)
-
-Script: [`scripts/provision-grafana-dashboards.sh`](scripts/provision-grafana-dashboards.sh)
-
-From the **repo root** (adjust paths if needed):
-
-**Single dashboard (default namespace `dittybopper`):**
-
-```bash
-./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json
-```
-
-**Multiple dashboards:**
-
-```bash
-./monitoring/scripts/provision-grafana-dashboards.sh monitoring/dashboard/desched-cnv.json other-dashboard.json
-```
-
-**Custom namespace:**
-
-```bash
-./monitoring/scripts/provision-grafana-dashboards.sh my-grafana-ns monitoring/dashboard/desched-cnv.json
-```
-
-**Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); the first argument is only treated as a namespace if it does **not** end in `.json`.
+### Grafana provisioning
 
 #### What provisioning does (overview)
 
