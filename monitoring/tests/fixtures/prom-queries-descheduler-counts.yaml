@@ -1,0 +1,10 @@
+# Minimal fixture for prom-query / prom_query_yaml tests (not the full monitoring copy).
+defaults:
+  start: "2026-01-01 00:00:00"
+  end: "2026-01-02 00:00:00"
+  step: 1m
+  threshold: 0.1
+
+count-cpu-util-pd:
+  description: "Count of nodes with CPU util positive deviation >= ${threshold} (fixture)"
+  query: count(descheduler:nodeutilization:cpu:avg1m:positivedeviation >= ${threshold})

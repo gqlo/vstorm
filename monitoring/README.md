@@ -50,6 +50,22 @@ python3 scripts/migration-stats.py
 # CSV listing (type, workload, vmim name, seconds)
 python3 scripts/migration-stats.py --csv
 python3 scripts/migration-stats.py --namespace my-ns --output out.csv
+
+# Eviction counts: summary on stderr (buckets + total); per-VMI CSV only with --output
+python3 scripts/migration-stats.py --eviction-counts
+python3 scripts/migration-stats.py --eviction-counts --namespace my-ns --output evictions.csv
+
+# Time range filtering (UTC; overlap with VMIM Pending→Succeeded; open-ended if one side omitted)
+python3 scripts/migration-stats.py --csv --start 2026-03-19T10:00:00Z --end 2026-03-19T11:00:00Z
+python3 scripts/migration-stats.py --csv --start '2026-02-19 17:28:51' --end '2026-02-19 18:00:00'
+python3 scripts/migration-stats.py --summary --start 2026-03-19T10:00:00Z
+python3 scripts/migration-stats.py --eviction-counts --start 2026-03-19T10:00:00Z --end 2026-03-19T11:00:00Z
+```
+
+Run monitoring unit tests (`migration-stats.py`, `prom_query_yaml` / `prom-query` YAML handling) from repo root:
+
+```bash
+python3 -m unittest discover -s monitoring/tests -v
 ```
 
 ### `compute_euclidean_distance.py`
@@ -77,6 +93,7 @@ defaults:
   start: "2026-02-24 19:10:37"
   end: "2026-02-24 19:20:25"
   step: 5s
+  threshold: 0.1 # optional; use ${threshold} in query and description strings
 
 my-query-name:
   description: "Human-readable label"

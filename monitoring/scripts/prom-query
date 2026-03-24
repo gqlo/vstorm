@@ -14,6 +14,8 @@
 
 set -eu
 
+PROM_QUERY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 NAMESPACE="openshift-monitoring"
 POD=""
 CONTAINER="prometheus"
@@ -50,6 +52,7 @@ YAML file format:
       start: "2026-02-19 19:00:00"
       end:   "2026-02-19 20:00:00"
       step:  15s
+      threshold: 0.1   # optional; substituted for \${threshold} in query and description
 
     memory-per-worker:
       description: "Memory utilization per worker"
@@ -82,49 +85,14 @@ require_python_yaml() {
 list_queries() {
 	local file="$1"
 	require_python_yaml
-	python3 -c '
-import yaml, sys
-
-with open(sys.argv[1]) as f:
-    data = yaml.safe_load(f)
-
-if not isinstance(data, dict) or not data:
-    print("(no queries found in file)", file=sys.stderr)
-    sys.exit(1)
-
-defaults = data.get("defaults", {}) if isinstance(data.get("defaults"), dict) else {}
-has_global_range = bool(defaults.get("start") or defaults.get("step"))
-
-for name, entry in data.items():
-    if name == "defaults":
-        continue
-    if not isinstance(entry, dict):
-        print(f"  {name}")
-        continue
-    desc = entry.get("description", "")
-    is_range = bool(entry.get("start") or entry.get("step")) or has_global_range
-    tag = " [range]" if is_range else ""
-    if desc:
-        print(f"  {name:30s} {desc}{tag}")
-    else:
-        print(f"  {name}{tag}")
-' "$file"
+	python3 "$PROM_QUERY_DIR/prom_query_yaml.py" list "$file"
 }
 
 # Returns all query names from the YAML (one per line, excluding "defaults")
 get_query_names() {
 	local file="$1"
 	require_python_yaml
-	python3 -c '
-import yaml, sys
-
-with open(sys.argv[1]) as f:
-    data = yaml.safe_load(f)
-
-for name in data:
-    if name != "defaults":
-        print(name)
-' "$file"
+	python3 "$PROM_QUERY_DIR/prom_query_yaml.py" names "$file"
 }
 
 # Outputs: start, end, step (one per line), then the query (may be multi-line)
@@ -132,37 +100,7 @@ lookup_query() {
 	local file="$1"
 	local name="$2"
 	require_python_yaml
-	python3 -c '
-import yaml, sys
-
-with open(sys.argv[1]) as f:
-    data = yaml.safe_load(f)
-
-defaults = data.get("defaults", {}) if isinstance(data.get("defaults"), dict) else {}
-
-name = sys.argv[2]
-entry = data.get(name)
-if entry is None:
-    available = [k for k in data if k != "defaults"]
-    print(f"Error: query \"{name}\" not found in {sys.argv[1]}", file=sys.stderr)
-    print("Available queries:", ", ".join(available), file=sys.stderr)
-    sys.exit(1)
-
-if isinstance(entry, dict):
-    q = entry.get("query")
-    if not q:
-        print(f"Error: query \"{name}\" has no \"query\" field", file=sys.stderr)
-        sys.exit(1)
-    print(entry.get("start", defaults.get("start", "")))
-    print(entry.get("end", defaults.get("end", "")))
-    print(entry.get("step", defaults.get("step", "")))
-    print(q.strip())
-else:
-    print(defaults.get("start", ""))
-    print(defaults.get("end", ""))
-    print(defaults.get("step", ""))
-    print(str(entry).strip())
-' "$file" "$name"
+	python3 "$PROM_QUERY_DIR/prom_query_yaml.py" lookup "$file" "$name"
 }
 
 # Resolve a time spec to a Unix timestamp.
@@ -233,6 +171,7 @@ run_query() {
 		raw_json=$(echo "$raw_json" | sed '$d')
 		if [[ "$code" != "200" ]]; then
 			echo "Prometheus returned HTTP $code" >&2
+			echo "  Resolved PromQL (first 240 chars): ${query:0:240}" >&2
 			echo "$raw_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error', d.get('message', 'unknown')))" 2>/dev/null || echo "$raw_json" | head -c 500 >&2
 			fatal "oc exec / curl failed — check pod name, namespace, and query syntax"
 		fi
@@ -244,6 +183,7 @@ run_query() {
 		raw_json=$(echo "$raw_json" | sed '$d')
 		if [[ "$code" != "200" ]]; then
 			echo "Prometheus returned HTTP $code" >&2
+			echo "  Resolved PromQL (first 240 chars): ${query:0:240}" >&2
 			echo "$raw_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('error', d.get('message', 'unknown')))" 2>/dev/null || echo "$raw_json" | head -c 500 >&2
 			fatal "oc exec / curl failed — check pod name, namespace, and query syntax"
 		fi
@@ -387,7 +327,9 @@ if [[ -n "$QUERY_FILE" ]]; then
 
 	for qname in "${query_names[@]}"; do
 		echo "[$qname]" >&2
-		local_output=$(lookup_query "$QUERY_FILE" "$qname") || exit 1
+		# Append sentinel so command substitution does not strip trailing newlines (breaks multi-line queries).
+		local_output=$(lookup_query "$QUERY_FILE" "$qname"; printf x) || exit 1
+		local_output=${local_output%x}
 		{
 			read -r yaml_start
 			read -r yaml_end
