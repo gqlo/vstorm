@@ -8,7 +8,7 @@
 defaults:
   start: "2026-02-24 19:10:37"
   end: "2026-02-24 19:20:25"
-  step: 5s
+  step: 1m
 
 memory-per-worker:
   description: "Memory utilization (allocatable-based) per worker node, 0-1"

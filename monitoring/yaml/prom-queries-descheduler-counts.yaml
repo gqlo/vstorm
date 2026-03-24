@@ -1,4 +1,4 @@
-# prom-queries-descheduler-counts.yaml - Count of nodes per step where metric >= 10%
+# prom-queries-descheduler-counts.yaml - Count of nodes per step where metric >= threshold
 # yamllint disable rule:line-length
 #
 # All queries use descheduler recording rules (requires descheduler PrometheusRule in cluster).
@@ -8,32 +8,33 @@
 #   monitoring/prom-query -f monitoring/prom-queries-descheduler-counts.yaml -l
 #   monitoring/prom-query -f monitoring/prom-queries-descheduler-counts.yaml count-cpu-util-pd
 
-# ~48h range, 1m step. Each query returns count of nodes with value >= 0.1 at each step.
+# Set threshold once here (same scale as desched metrics; 0.1 = 10%).
 defaults:
-  start: "2026-02-19 21:00:00"
-  end: "2026-02-21 21:00:00"
+  start: "2026-03-21 00:17:50"
+  end: "2026-03-23 00:17:50"
   step: 1m
+  threshold: 0.2
 
 count-cpu-util-pd:
-  description: "Count of nodes with CPU util positive deviation >= 10% (per step over 48h)"
-  query: count(descheduler:nodeutilization:cpu:avg1m:positivedeviation >= 0.1)
+  description: "Count of nodes with CPU util positive deviation >= ${threshold}"
+  query: count(descheduler:nodeutilization:cpu:avg1m:positivedeviation >= ${threshold})
 
 count-cpu-pressure-pd:
-  description: "Count of nodes with CPU pressure positive deviation >= 10% (per step over 48h)"
-  query: count(descheduler:nodepressure:cpu:avg1m:positivedeviation >= 0.1)
+  description: "Count of nodes with CPU pressure positive deviation >= ${threshold}"
+  query: count(descheduler:nodepressure:cpu:avg1m:positivedeviation >= ${threshold})
 
 count-memory-util-pd:
-  description: "Count of nodes with memory util positive deviation >= 10% (per step over 48h)"
-  query: count(descheduler:nodeutilization:memory:avg1m:positivedeviation >= 0.1)
+  description: "Count of nodes with memory util positive deviation >= ${threshold}"
+  query: count(descheduler:nodeutilization:memory:avg1m:positivedeviation >= ${threshold})
 
 count-memory-pressure-pd:
-  description: "Count of nodes with memory pressure positive deviation >= 10% (per step over 48h)"
-  query: count(descheduler:nodepressure:memory:avg1m:positivedeviation >= 0.1)
+  description: "Count of nodes with memory pressure positive deviation >= ${threshold}"
+  query: count(descheduler:nodepressure:memory:avg1m:positivedeviation >= ${threshold})
 
 count-ideal-point-distance:
-  description: "Count of nodes with ideal-point distance >= 10% (per step over 48h)"
-  query: count(descheduler:node:ideal_point_positive_distance:avg1m >= 0.1)
+  description: "Count of nodes with ideal-point distance >= ${threshold}"
+  query: count(descheduler:node:ideal_point_positive_distance:avg1m >= ${threshold})
 
 count-linear-amplified-distance:
-  description: "Count of nodes with linear amplified (k3) distance >= 10% (per step over 48h)"
-  query: count(descheduler:node:linear_amplified_ideal_point_positive_distance:k3:avg1m >= 0.1)
+  description: "Count of nodes with linear amplified (k3) distance >= ${threshold}"
+  query: count(descheduler:node:linear_amplified_ideal_point_positive_distance:k3:avg1m >= ${threshold})
