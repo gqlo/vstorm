@@ -6,6 +6,7 @@ This directory holds **Grafana dashboards**, **Prometheus-related YAML**, and **
 
 - [Persist your JSON dashboard in Dittybopper (provisioning to dittybopper)](#persist-your-json-dashboard-in-dittybopper-provisioning-to-dittybopper)
 - [Run Prometheus queries](#prom-query)
+- [VM dirty rate (libvirt vs KubeVirt)](#vm-dirty-rate-libvirt-vs-kubevirt)
 - [Summarize migration stats](#migration-statspy)
 - [Compute Euclidean distance](#compute_euclidean_distancepy)
 - [Troubleshooting](#troubleshooting)
@@ -22,6 +23,23 @@ Use the **provisioning script** below to persist dashboard JSON across pod resta
 ```
 
 **Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); the first argument is only treated as a namespace if it does **not** end in `.json`.
+
+### VM dirty rate (libvirt vs KubeVirt)
+
+QEMU **calc-dirty-rate** / **query-dirty-rate** (dirty-bitmap mode), printed as MB/s.
+
+| Script | Use when |
+|--------|----------|
+| [`scripts/dirty-page.sh`](scripts/dirty-page.sh) | VM runs on **local libvirt** (`virsh` + sudo on the host). Set `VM` to the guest name. |
+| [`scripts/kubevirt-dirty-rate.sh`](scripts/kubevirt-dirty-rate.sh) | VM is a **KubeVirt VMI**: finds the **virt-launcher** pod, runs `virsh` in container `compute`. |
+
+```bash
+# KubeVirt (needs oc/kubectl, jq, Running VMI). Arg is VMI name (oc get vmi) or virt-launcher pod name.
+./scripts/kubevirt-dirty-rate.sh -n my-namespace my-vmi-name
+./scripts/kubevirt-dirty-rate.sh -n my-namespace virt-launcher-my-vmi-name-xxxxx
+
+# Optional: CALC_TIME=2 SAMPLE_GAP=2 ./scripts/kubevirt-dirty-rate.sh -n ns vmi
+```
 
 ### `prom-query`
 

@@ -1,0 +1,24 @@
+# prom-queries-descheduler-counts.yaml - Count of nodes per step where metric >= threshold
+# yamllint disable rule:line-length
+#
+# All queries use descheduler recording rules (requires descheduler PrometheusRule in cluster).
+# Cross-reference: monitoring/desched-rules.yaml
+#
+# Usage:
+#   monitoring/prom-query -f monitoring/prom-queries-descheduler-counts.yaml -l
+#   monitoring/prom-query -f monitoring/prom-queries-descheduler-counts.yaml count-cpu-util-pd
+
+# Set threshold once here (same scale as desched metrics; 0.1 = 10%).
+defaults:
+  start: "2026-02-27 17:24:34"
+  end: "2026-03-01 17:24:03"
+  step: 1m
+  threshold: 0.2
+
+overutilized-nodes-metrics:
+  description: "Count of classified overutilized nodes"
+  query: |
+    count(
+      descheduler:node:linear_amplified_ideal_point_positive_distance:k3:avg1m
+      > on() group_left() avg(descheduler:node:linear_amplified_ideal_point_positive_distance:k3:avg1m) + ${threshold}
+    )

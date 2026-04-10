@@ -24,6 +24,8 @@ RANGE_START=""
 RANGE_END=""
 RANGE_STEP=""
 CSV_DIR=""
+RAW_MODE=false
+UTC_DATE_DATA_MODE=false
 
 fatal() {
 	echo "Error: $*" >&2
@@ -35,13 +37,16 @@ usage() {
 Usage: $(basename "$0") QUERIES.yaml                      Run all queries, save to csv-data/
        $(basename "$0") QUERIES.yaml QUERY_NAME           Run one query, save to csv-data/
        $(basename "$0") QUERIES.yaml -l                   List available queries
-       $(basename "$0") [-s START] [-e END] [-S STEP] 'PROMQL'   Inline query to stdout
+       $(basename "$0") [-s START] [-e END] [-S STEP] [-r] [-u] 'PROMQL'   Inline query to stdout
 
 Options:
     -l             List available query names, then exit
     -s START       Range start: relative (1h, 30m, 2d) or "YYYY-MM-DD HH:MM:SS"
     -e END         Range end: "now", relative, or absolute (default: now)
     -S STEP        Range step interval (15s, 1m, 5m)
+    -r             Output raw Prometheus JSON (no CSV conversion)
+    -u             Output UTC CSV as date,selector,data (selector = {k="v",...} from series labels)
+                  (-r and -u may also appear after QUERIES.yaml or QUERY_NAME; see examples)
     -n NAMESPACE   Prometheus namespace (default: openshift-monitoring)
     -p POD         Prometheus pod name (default: auto-detect)
     -c CONTAINER   Container name (default: prometheus)
@@ -66,6 +71,8 @@ Examples:
     $(basename "$0") monitoring/prom-queries.yaml memory-per-worker
     $(basename "$0") monitoring/prom-queries.yaml -l
     $(basename "$0") -s 1h -e now -S 5m 'up{job="kubelet"}'
+    $(basename "$0") -r ../yaml/queries.yaml my-query
+    $(basename "$0") ../yaml/queries.yaml my-query -r
 EOF
 	exit "${1:-0}"
 }
@@ -189,6 +196,66 @@ run_query() {
 		fi
 	fi
 
+	if [[ "$RAW_MODE" == true ]]; then
+		echo "$raw_json"
+		return 0
+	fi
+
+	if [[ "$UTC_DATE_DATA_MODE" == true ]]; then
+		echo "$raw_json" | python3 -c '
+import csv, json, sys, datetime
+
+def ts_fmt(epoch):
+    return datetime.datetime.fromtimestamp(epoch, tz=datetime.timezone.utc) \
+                   .strftime("%Y-%m-%d %H:%M:%S UTC")
+
+def metric_to_selector(metric):
+    # Prometheus-style {k="v",...} from series labels (__name__ omitted).
+    if not metric:
+        return "{}"
+    parts = []
+    for k in sorted(metric.keys()):
+        if k == "__name__":
+            continue
+        parts.append("%s=%s" % (k, json.dumps(str(metric[k]))))
+    return "{" + ",".join(parts) + "}"
+
+data = json.load(sys.stdin)
+if data.get("status") != "success":
+    print("Query failed:", data.get("error", "unknown error"), file=sys.stderr)
+    sys.exit(1)
+
+result_type = data.get("data", {}).get("resultType", "")
+results = data.get("data", {}).get("result", [])
+writer = csv.writer(sys.stdout)
+writer.writerow(["date", "selector", "data"])
+
+if not results:
+    sys.exit(0)
+
+if result_type == "matrix":
+    rows = []
+    for r in results:
+        sel = metric_to_selector(r.get("metric", {}))
+        for ts_epoch, value in r.get("values", []):
+            rows.append((float(ts_epoch), sel, value))
+    rows.sort(key=lambda x: (x[0], x[1]))
+    for ts_epoch, sel, value in rows:
+        writer.writerow([ts_fmt(ts_epoch), sel, value])
+else:
+    rows = []
+    for r in results:
+        sel = metric_to_selector(r.get("metric", {}))
+        ts_epoch, value = r.get("value", [None, None])
+        if ts_epoch is not None:
+            rows.append((float(ts_epoch), sel, value))
+    rows.sort(key=lambda x: (x[0], x[1]))
+    for ts_epoch, sel, value in rows:
+        writer.writerow([ts_fmt(ts_epoch), sel, value])
+'
+		return 0
+	fi
+
 	export QUERY_VALUE_HEADER="$value_header"
 	echo "$raw_json" | python3 -c '
 import json, sys, datetime, os
@@ -246,11 +313,13 @@ else:
 # Option parsing
 # ---------------------------------------------------------------------------
 
-while getopts ":n:p:c:ls:e:S:h" opt; do
+while getopts ":n:p:c:rlus:e:S:h" opt; do
 	case "$opt" in
 		n) NAMESPACE="$OPTARG" ;;
 		p) POD="$OPTARG" ;;
 		c) CONTAINER="$OPTARG" ;;
+		r) RAW_MODE=true ;;
+		u) UTC_DATE_DATA_MODE=true ;;
 		l) LIST_MODE=true ;;
 		s) RANGE_START="$OPTARG" ;;
 		e) RANGE_END="$OPTARG" ;;
@@ -261,6 +330,10 @@ while getopts ":n:p:c:ls:e:S:h" opt; do
 	esac
 done
 shift $((OPTIND - 1))
+
+if [[ "$RAW_MODE" == true ]] && [[ "$UTC_DATE_DATA_MODE" == true ]]; then
+	fatal "options -r and -u are mutually exclusive"
+fi
 
 if [[ $# -lt 1 ]]; then
 	fatal "missing argument (see -h for usage)"
@@ -314,15 +387,45 @@ fi
 if [[ -n "$QUERY_FILE" ]]; then
 	mkdir -p "$CSV_DIR"
 
-	# Build list of queries to run (specific name or all)
-	if [[ $# -ge 1 ]]; then
+	# -r/-u after YAML path or QUERY_NAME (POSIX getopts stops at first non-option, so these were ignored)
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-r) RAW_MODE=true; shift ;;
+			-u) UTC_DATE_DATA_MODE=true; shift ;;
+			*) break ;;
+		esac
+	done
+
+	query_names=()
+	if [[ $# -ge 1 ]] && [[ "$1" != -* ]]; then
 		query_names=("$1")
-	else
+		shift
+	fi
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-r) RAW_MODE=true; shift ;;
+			-u) UTC_DATE_DATA_MODE=true; shift ;;
+			*) fatal "unexpected argument: $1" ;;
+		esac
+	done
+
+	if [[ "$RAW_MODE" == true ]] && [[ "$UTC_DATE_DATA_MODE" == true ]]; then
+		fatal "options -r and -u are mutually exclusive"
+	fi
+
+	if [[ ${#query_names[@]} -eq 0 ]]; then
 		mapfile -t query_names < <(get_query_names "$QUERY_FILE")
 	fi
 
 	echo "Using pod $POD in $NAMESPACE" >&2
-	echo "Saving CSVs to $CSV_DIR/" >&2
+	if [[ "$RAW_MODE" == true ]]; then
+		echo "Saving raw JSON to $CSV_DIR/" >&2
+	elif [[ "$UTC_DATE_DATA_MODE" == true ]]; then
+		echo "Saving UTC date,selector,data CSVs to $CSV_DIR/" >&2
+	else
+		echo "Saving CSVs to $CSV_DIR/" >&2
+	fi
 	echo "" >&2
 
 	for qname in "${query_names[@]}"; do
@@ -342,7 +445,9 @@ if [[ -n "$QUERY_FILE" ]]; then
 		[[ -n "$RANGE_END" ]] && yaml_end="$RANGE_END"
 		[[ -n "$RANGE_STEP" ]] && yaml_step="$RANGE_STEP"
 
-		outfile="$CSV_DIR/${qname}.csv"
+		ext="csv"
+		[[ "$RAW_MODE" == true ]] && ext="json"
+		outfile="$CSV_DIR/${qname}.${ext}"
 		run_query "$query_text" "$yaml_start" "$yaml_end" "$yaml_step" "$qname" > "$outfile"
 		echo "  -> $outfile" >&2
 		echo "" >&2
@@ -356,4 +461,18 @@ fi
 # Inline PromQL mode: output to stdout
 # ---------------------------------------------------------------------------
 
-run_query "$1" "$RANGE_START" "$RANGE_END" "$RANGE_STEP"
+PROMQL="$1"
+shift
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-r) RAW_MODE=true; shift ;;
+		-u) UTC_DATE_DATA_MODE=true; shift ;;
+		*) fatal "unexpected argument: $1" ;;
+	esac
+done
+
+if [[ "$RAW_MODE" == true ]] && [[ "$UTC_DATE_DATA_MODE" == true ]]; then
+	fatal "options -r and -u are mutually exclusive"
+fi
+
+run_query "$PROMQL" "$RANGE_START" "$RANGE_END" "$RANGE_STEP"
