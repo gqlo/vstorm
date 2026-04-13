@@ -177,15 +177,20 @@ To override, pass your own file with `--cloudinit=FILE`. In default (URL) mode, 
 
 ### Custom cloud-init
 
-Use `--cloudinit=FILE` to inject any cloud-init user-data file:
+Use `--cloudinit=FILE` to inject any cloud-init user-data file. Built-in workloads live under `workload/`.
 
 ```bash
+# stress-ng workload (memory-heavy default); presets, min/max, and more in docs/cloud-init-stress-ng-workload.md
 vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
+
+# stress-ng with env overrides (repeatable --env); e.g. WORKLOAD_TYPE=cpu-heavy|balanced
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
+
+# Steady anonymous dirty memory: compiles workload/dirty-mem-pages.c on first boot; DIRTY_RATE_FRACTION is a fraction of total physical RAM (0.1–0.9, e.g. 0.9 = 90%; default 0.5 if --env omitted)
+vstorm --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --env DIRTY_RATE_FRACTION=0.4 --vms=5
 ```
 
-The unified workload cloud-init lives in `workload/`. See [docs/cloud-init-stress-ng-workload.md](docs/cloud-init-stress-ng-workload.md) for design, flow, and parameters.
-
-- **workload/cloudinit-stress-ng-workload.yaml** — Installs `stress-ng` and runs a configurable workload. Set `WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced`. Override via `--env KEY=VAL` (repeatable). See [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) for presets, min/max, and copy-paste commands.
+See [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) for stress-ng design, flow, and parameters. The dirty-mem workload uses [workload/dirty-mem-pages.c](workload/dirty-mem-pages.c).
 
 ## Custom templates
 
@@ -311,7 +316,7 @@ The hook runs only the checks relevant to the files you are committing:
 |---|---|
 | `vstorm`, `templates/*`, `helpers/*`, `workload/*`, `tests/*.bats` | `bats tests/` |
 | `helpers/*.yaml`, `workload/*.yaml` | `yamllint` on changed files |
-| `*.md` | `markdownlint-cli2` on changed files |
+| any staged `*.md` / `*.MD` (e.g. `docs/...`, `monitoring/...`) | `markdownlint-cli2` on changed files |
 
 If any check fails, the commit is aborted. Fix the issues and commit again. In emergencies, use `git commit --no-verify` to skip the hook.
 
@@ -332,6 +337,8 @@ helpers/
   cloudinit-default.yaml            # default cloud-init (root password SSH)
 workload/
   cloudinit-stress-ng-workload.yaml  # unified stress-ng workload (WORKLOAD_TYPE, env overrides)
+  cloudinit-dirty-mem-pages.yaml     # compile to dirty-mem-pages; --env DIRTY_RATE_FRACTION=0.1-0.9
+  dirty-mem-pages.c                  # source for dirty-mem workload (embedded in cloud-init YAML)
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)
 templates/

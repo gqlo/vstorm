@@ -6,7 +6,7 @@ Modes:
 - Migration duration CSV:
   - Compute time in seconds between Pending → Succeeded for each VMIM
   - Differentiate evacuation (kubevirt-evacuation-*), workload (workload*), migration (kubevirt-migrate*)
-  - Output columns: "type, workload, vmim name, time in seconds"
+  - Output columns: "type, workload, vmim name, time in seconds, source node, target node"
 - Summary:
   - Aggregate statistics over completed migrations (first/last completion, span, per‑hour rate, min/median/max)
   - Include a count of currently running VMIs
@@ -100,6 +100,23 @@ def workload_name(item: dict) -> str:
     return (
         item.get("spec", {}).get("vmiName")
         or item.get("metadata", {}).get("name", "")
+    )
+
+
+def vmim_migration_nodes(item: dict) -> tuple[str, str]:
+    """
+    Return (source_node, target_node) from status.migrationState.
+
+    KubeVirt populates these when migration state is recorded; empty strings if absent.
+    """
+    state = (item.get("status") or {}).get("migrationState")
+    if not isinstance(state, dict):
+        return ("", "")
+    src = state.get("sourceNode")
+    tgt = state.get("targetNode")
+    return (
+        "" if src is None else str(src),
+        "" if tgt is None else str(tgt),
     )
 
 
@@ -481,12 +498,15 @@ def main() -> None:
         workload = workload_name(item)
         sec = migration_seconds(item)
         sec_str = f"{sec:.2f}" if sec is not None else ""
-        rows.append((typ, workload, display_name, sec_str))
+        src_node, tgt_node = vmim_migration_nodes(item)
+        rows.append((typ, workload, display_name, sec_str, src_node, tgt_node))
 
     out = open(args.output, "w", newline="") if args.output else sys.stdout
     try:
         writer = csv.writer(out)
-        writer.writerow(["type", "workload", "vmim name", "time in seconds"])
+        writer.writerow(
+            ["type", "workload", "vmim name", "time in seconds", "source node", "target node"]
+        )
         writer.writerows(rows)
     finally:
         if args.output:

@@ -45,6 +45,21 @@ One test per README Quick Start example. Each validates the full YAML output end
 | QS-9 | `-n --vms=10` | Dry-run outputs YAML, no `oc apply`, no completion message |
 | QS-10 | `--delete=a3f7b2` | Delete dry-run shows correct `oc delete` command |
 
+### Dirty-rate cloud-init workload
+
+The file [workload/cloudinit-dirty-mem-pages.yaml](../workload/cloudinit-dirty-mem-pages.yaml)
+installs `gcc`, writes `dirty-mem-pages.c`, compiles to `/usr/local/bin/dirty-mem-pages`, and starts
+`dirty-mem-pages.service`. The RAM fraction is passed from the host with
+**`--env DIRTY_RATE_FRACTION=`*value*** (0.1–0.9). If `--env` is not used, the service defaults to
+**0.5** via `Environment=` in the unit file.
+
+Example dry-run:
+
+```bash
+vstorm -n --batch-id=dr-test --datasource=rhel9 --vms=1 --namespaces=1 \
+  --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --env DIRTY_RATE_FRACTION=0.4
+```
+
 ### Dry-run YAML file tests
 
 | Test | What it validates |

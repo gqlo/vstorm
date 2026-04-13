@@ -49,6 +49,30 @@ def _vmim(
     }
 
 
+class TestVmimMigrationNodes(unittest.TestCase):
+    def test_empty_when_no_migration_state(self) -> None:
+        item = {"status": {}}
+        self.assertEqual(ms.vmim_migration_nodes(item), ("", ""))
+
+    def test_reads_source_and_target(self) -> None:
+        item = {
+            "status": {
+                "migrationState": {
+                    "sourceNode": "node-a.example",
+                    "targetNode": "node-b.example",
+                }
+            }
+        }
+        self.assertEqual(
+            ms.vmim_migration_nodes(item),
+            ("node-a.example", "node-b.example"),
+        )
+
+    def test_partial_fields(self) -> None:
+        item = {"status": {"migrationState": {"sourceNode": "only-src"}}}
+        self.assertEqual(ms.vmim_migration_nodes(item), ("only-src", ""))
+
+
 class TestParseIso8601Utc(unittest.TestCase):
     def test_accepts_z_suffix(self) -> None:
         dt = ms.parse_iso8601_utc("2026-03-19T10:00:00Z")

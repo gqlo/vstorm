@@ -505,3 +505,21 @@ SLOWMOCK
   [[ "$decoded" != *"{VSTORM_GUEST_ENV}"* ]]
 }
 
+# ---------------------------------------------------------------
+# OPT: dirty-rate cloud-init includes systemd unit and env injection
+# ---------------------------------------------------------------
+@test "OPT: cloudinit-dirty-mem-pages.yaml with --env DIRTY_RATE_FRACTION" {
+  run bash "$VSTORM" -n --batch-id=env05 --datasource=rhel9 --vms=1 --namespaces=1 \
+    --cloudinit=workload/cloudinit-dirty-mem-pages.yaml \
+    --env DIRTY_RATE_FRACTION=0.4
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kind: Secret"* ]]
+  [[ "$output" == *"userdata:"* ]]
+  userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+  [ -n "$userdata_b64" ]
+  decoded=$(echo "$userdata_b64" | base64 -d 2>/dev/null)
+  [[ "$decoded" == *"DIRTY_RATE_FRACTION=0.4"* ]]
+  [[ "$decoded" == *"dirty-mem-pages.service"* ]]
+  [[ "$decoded" != *"{VSTORM_GUEST_ENV}"* ]]
+}
+

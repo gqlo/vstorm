@@ -6,6 +6,9 @@
 #   git config core.hooksPath hooks
 # Or:
 #   ln -sf ../../hooks/pre-commit .git/hooks/pre-commit
+#
+# Runs yamllint on staged helpers/*.yaml and workload/*.yaml, markdownlint-cli2
+# on any staged *.md, and bats when vstorm / templates / helpers / workload / tests change.
 
 set -eu
 
@@ -17,45 +20,53 @@ run_tests=0
 yaml_files=()
 md_files=()
 
-while IFS= read -r f ; do
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+
+    # Anywhere under repo: .md / .MD (case does not match paths with newlines)
+    if [[ "$f" =~ \.(md|MD)$ ]]; then
+        md_files+=("$f")
+    fi
+
+    # Same scope as documented for yamllint (templates/*.yaml omitted — not valid YAML for yamllint)
+    if [[ "$f" == helpers/*.yaml || "$f" == workload/*.yaml ]]; then
+        yaml_files+=("$f")
+    fi
+
     case "$f" in
         vstorm|templates/*|helpers/*|workload/*|tests/*.bats|tests/helpers.bash)
             run_tests=1 ;;
-        helpers/*.yaml|workload/*.yaml)
-            yaml_files+=("$f") ;;
-        *.md)
-            md_files+=("$f") ;;
     esac
 done <<< "$staged"
 
-if ((run_tests)) ; then
-    if type -p bats &>/dev/null ; then
+if ((run_tests)); then
+    if type -p bats &>/dev/null; then
         echo "pre-commit: running bats tests..."
-        bats tests/ || { echo "pre-commit: bats FAILED"; ((errors++)); }
+        bats tests/ || { echo "pre-commit: bats FAILED"; errors=$((errors + 1)); }
     else
         echo "pre-commit: WARNING -- bats not found, skipping tests"
     fi
 fi
 
-if ((${#yaml_files[@]})) ; then
-    if type -p yamllint &>/dev/null ; then
+if ((${#yaml_files[@]})); then
+    if type -p yamllint &>/dev/null; then
         echo "pre-commit: yamllint (${#yaml_files[@]} file(s))..."
-        yamllint "${yaml_files[@]}" || { echo "pre-commit: yamllint FAILED"; ((errors++)); }
+        yamllint "${yaml_files[@]}" || { echo "pre-commit: yamllint FAILED"; errors=$((errors + 1)); }
     else
-        echo "pre-commit: WARNING -- yamllint not found"
+        echo "pre-commit: WARNING -- yamllint not found, skipping YAML lint"
     fi
 fi
 
-if ((${#md_files[@]})) ; then
-    if type -p markdownlint-cli2 &>/dev/null ; then
-        echo "pre-commit: markdownlint (${#md_files[@]} file(s))..."
-        markdownlint-cli2 "${md_files[@]}" || { echo "pre-commit: markdownlint FAILED"; ((errors++)); }
+if ((${#md_files[@]})); then
+    if type -p markdownlint-cli2 &>/dev/null; then
+        echo "pre-commit: markdownlint-cli2 (${#md_files[@]} file(s))..."
+        markdownlint-cli2 "${md_files[@]}" || { echo "pre-commit: markdownlint-cli2 FAILED"; errors=$((errors + 1)); }
     else
-        echo "pre-commit: WARNING -- markdownlint-cli2 not found"
+        echo "pre-commit: WARNING -- markdownlint-cli2 not found, skipping Markdown lint"
     fi
 fi
 
-if ((errors)) ; then
+if ((errors)); then
     echo -e "\npre-commit: $errors check(s) failed -- commit aborted"
     exit 1
 fi

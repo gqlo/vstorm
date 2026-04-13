@@ -10,8 +10,8 @@
 
 # Set threshold once here (same scale as desched metrics; 0.1 = 10%).
 defaults:
-  start: "2026-03-21 00:17:50"
-  end: "2026-03-23 00:17:50"
+  start: "2026-02-27 17:24:34"
+  end: "2026-03-01 17:24:03"
   step: 1m
   threshold: 0.2
 
