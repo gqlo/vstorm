@@ -34,6 +34,8 @@ BASENAME_SET=0
 PVC_BASE_NAME_SET=0
 VM_CPU_CORES="1"
 VM_MEMORY="1Gi"
+# Guest firmware: efi (OVMF + SMM; secureBoot false by default) or bios (legacy)
+VM_FIRMWARE="efi"
 # Default to using the templates/ directory relative to this script.
 BUILTIN_TEMPLATES_DIR="$(dirname "$0")/templates"
 CREATE_VM_PATH=${CREATE_VM_PATH:-$BUILTIN_TEMPLATES_DIR}
@@ -117,6 +119,7 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
         --basename=name         VM basename ($VM_BASENAME)
         --cores=N               VM CPU cores ($VM_CPU_CORES)
         --memory=N              VM memory size ($VM_MEMORY)
+        --firmware=MODE         Guest boot firmware: bios or efi (default: $VM_FIRMWARE)
         --request-memory=N      VM memory request (VM memory size)
         --request-cpu=N         VM CPU request (VM CPU cores)
         --vms=N                 Number of VMs ($NUM_VMS)
@@ -186,6 +189,12 @@ process_option() {
 	base*)	   VM_BASENAME=$value; BASENAME_SET=1 ;;
 	core*)	   VM_CPU_CORES=$value ;;
 	mem*)	   VM_MEMORY=$value ;;
+	firmware)
+	    case "${value,,}" in
+		bios|efi) VM_FIRMWARE=${value,,} ;;
+		*) fatal "Invalid --firmware='$value'; use bios or efi" ;;
+	    esac
+	    ;;
 	requestm*) VM_MEMORY_REQUEST=$value ;;
 	requestc*) VM_CPU_REQUEST=$value ;;
 	vmsper*)   NUM_VMS_PER_NAMESPACE=$value ;;
@@ -1110,6 +1119,27 @@ $(local resource; for resource in "${!requests[@]}" ; do echo "    $resource: ${
     local cloudinit_volume=""
     local cloudinit_b64=""
     local cloudinit_secret_file=""
+    local domain_firmware=
+    case "${VM_FIRMWARE,,}" in
+	efi)
+	    domain_firmware="features:
+  smm:
+    enabled: true
+firmware:
+  bootloader:
+    efi:
+      secureBoot: false"
+	    ;;
+	bios)
+	    domain_firmware="firmware:
+  bootloader:
+    bios: {}"
+	    ;;
+	*)
+	    fatal "Invalid VM_FIRMWARE='$VM_FIRMWARE' (expected bios or efi)"
+	    ;;
+    esac
+
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
 	cloudinit_content=$(cat "$CLOUDINIT_FILE")
 	_guest_env_branch=false
@@ -1178,6 +1208,7 @@ $(local resource; for resource in "${!requests[@]}" ; do echo "    $resource: ${
 	    if [[ -z "${existing_vms[$vm_name]:-}" ]] ; then
 		log_message "Creating VirtualMachine ${C_VAL}$VM_ID${C_RST} for namespace: ${C_VAL}$namespace${C_RST}"
 		process_template "$vm_file" |
+		    indent_token DOMAIN_FIRMWARE "$domain_firmware" |
 		    indent_token RESOURCES "$requeststr" |
 		    indent_token CLOUDINIT_DISK "$cloudinit_disk" |
 		    indent_token CLOUDINIT_VOLUME "$cloudinit_volume" |
@@ -1605,6 +1636,7 @@ main() {
     fi
     log_message "VM CPU cores:  ${C_VAL}$VM_CPU_CORES${C_RST}"
     log_message "VM memory:     ${C_VAL}$VM_MEMORY${C_RST}"
+    log_message "VM firmware:   ${C_VAL}$VM_FIRMWARE${C_RST}"
     log_message "Cloud-init:    ${C_VAL}${CLOUDINIT_FILE:-none}${C_RST}"
     log_message "Run strategy:  ${C_VAL}$RUN_STRATEGY${C_RST}"
 

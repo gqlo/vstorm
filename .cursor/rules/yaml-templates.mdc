@@ -16,7 +16,9 @@ Templates use `{VARIABLE_NAME}` placeholders processed by `sed` in `process_temp
 
 ### Indented token placeholders
 
-`{CLOUDINIT_DISK}`, `{CLOUDINIT_VOLUME}`, `{RESOURCES}` are processed by `indent_token()`. These must appear **alone on a line** with leading spaces that define the indentation level:
+`{CLOUDINIT_DISK}`, `{CLOUDINIT_VOLUME}`, `{RESOURCES}`, `{DOMAIN_FIRMWARE}` are processed by `indent_token()`. These must appear **alone on a line** with leading spaces that define the indentation level:
+
+- **`{DOMAIN_FIRMWARE}`** — expands from `--firmware=efi` (default: `features.smm` + `firmware.bootloader.efi` with **`secureBoot: false`**) or `--firmware=bios` (`firmware.bootloader.bios: {}` only).
 
 ```yaml
       devices:

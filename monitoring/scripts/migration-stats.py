@@ -37,12 +37,16 @@ Usage:
   python migration-stats.py --summary --start 2026-03-19T10:00:00Z
   python migration-stats.py --eviction-counts --start 2026-03-19T10:00:00Z --end 2026-03-19T11:00:00Z
 
+  # Save each VMIM as YAML (oc get -o yaml) under a directory; requires --namespace
+  python migration-stats.py --namespace NAMESPACE --save-vmims ./vmims-out/
+
 Requires: oc in PATH, cluster access.
 """
 
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 from collections import Counter
@@ -243,6 +247,42 @@ def interval_overlaps(
     return True
 
 
+def save_vmim_yamls_dir(namespace: str, items: list[dict], out_dir: str) -> None:
+    """
+    For each VMIM in items, run ``oc get vmim NAME -n namespace -o yaml`` and write
+    ``out_dir/NAME.yaml``. Creates out_dir if missing.
+    """
+    if os.path.exists(out_dir) and not os.path.isdir(out_dir):
+        print(
+            f"Error: --save-vmims target exists and is not a directory: {out_dir}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    os.makedirs(out_dir, exist_ok=True)
+    for item in items:
+        meta = item.get("metadata", {}) or {}
+        name = meta.get("name") or ""
+        if not name:
+            print("Error: VMIM object missing metadata.name; cannot save.", file=sys.stderr)
+            sys.exit(1)
+        dest = os.path.join(out_dir, f"{name}.yaml")
+        result = subprocess.run(
+            ["oc", "get", "vmim", name, "-n", namespace, "-o", "yaml"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(
+                f"Error: oc get vmim {name!r} -n {namespace!r} failed:\n"
+                f"{result.stderr or result.stdout}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(result.stdout)
+
+
 def filter_items_by_time_range(
     items: list[dict],
     start_dt: datetime | None,
@@ -401,6 +441,15 @@ def main() -> None:
         action="store_true",
         help="Eviction summary on stderr (buckets + total); per-VMI CSV only with -o/--output",
     )
+    parser.add_argument(
+        "--save-vmims",
+        metavar="DIR",
+        default=None,
+        help=(
+            "Directory to write one YAML file per VMIM (oc get vmim … -o yaml). "
+            "Requires --namespace/-n. Same scope as other modes (--name, --start/--end)."
+        ),
+    )
     args = parser.parse_args()
 
     if len(sys.argv) == 1:
@@ -408,6 +457,10 @@ def main() -> None:
 
     if args.namespace is not None and not namespace_exists(args.namespace):
         print(f"Error: namespace '{args.namespace}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.save_vmims is not None and args.namespace is None:
+        print("Error: --save-vmims requires --namespace/-n.", file=sys.stderr)
         sys.exit(1)
 
     data = get_vmim_json(args.namespace, args.name)
@@ -435,6 +488,17 @@ def main() -> None:
             sys.exit(1)
 
     items = filter_items_by_time_range(items, start_dt=start_dt, end_dt=end_dt)
+
+    if args.save_vmims is not None:
+        save_vmim_yamls_dir(args.namespace, items, args.save_vmims)
+        print(
+            f"Wrote {len(items)} VMIM YAML file(s) under {args.save_vmims!r}.",
+            file=sys.stderr,
+        )
+        if not items:
+            sys.exit(1)
+        if not args.eviction_counts and not args.summary and not args.csv:
+            return
 
     # Eviction-counts mode: takes precedence over summary/csv
     if args.eviction_counts:

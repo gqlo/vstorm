@@ -87,6 +87,7 @@ Unless overridden, vstorm uses these built-in defaults (relevant to the [example
 |---|---|---|
 | CPU cores | `1` | Override with `--cores` (e.g. example 2) |
 | Memory | `1Gi` | Override with `--memory` (e.g. example 2) |
+| Firmware | `efi` | `efi` → OVMF with **`secureBoot: false`**; use `--firmware=bios` for legacy BIOS boot |
 | VMs | `1` | Override with `--vms` |
 | Namespaces | `1` | Override with `--namespaces` |
 | Storage class | `ocs-storagecluster-ceph-rbd-virtualization` | OCS; override with `--storage-class` (example 5) |
@@ -107,6 +108,7 @@ Usage: vstorm [options] [number_of_vms [number_of_namespaces]]
 
     --cores=N                   CPU cores visible to the guest VM (default: 1)
     --memory=N                  Memory visible to the guest VM (default: 1Gi)
+    --firmware=MODE             Guest boot firmware: bios or efi (default: efi; efi uses secureBoot: false)
     --request-cpu=N             Kubernetes CPU request for scheduling (default: same as --cores)
     --request-memory=N          Kubernetes memory request for scheduling (default: same as --memory)
 

@@ -85,6 +85,20 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
+# --firmware=bios uses BIOS bootloader (no EFI / SMM block)
+# ---------------------------------------------------------------
+@test "--firmware=bios emits BIOS bootloader and secureBoot is absent" {
+  run bash "$VSTORM" -n --batch-id=yamlbios --datasource=rhel9 --vms=1 --namespaces=1 \
+    --firmware=bios
+  [ "$status" -eq 0 ]
+
+  [[ "$output" == *"bios: {}"* ]]
+  [[ "$output" != *"efi:"* ]]
+  [[ "$output" != *"secureBoot:"* ]]
+  [[ "$output" != *"smm:"* ]]
+}
+
+# ---------------------------------------------------------------
 # --run-strategy=Halted sets run strategy to Halted
 # ---------------------------------------------------------------
 @test "--run-strategy=Halted sets runStrategy to Halted" {
