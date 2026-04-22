@@ -1,9 +1,5 @@
 logs/
 tmp/
-# Large local guest disks in custom-build-images/ (see custom-build-images/README.md)
-custom-build-images/*.qcow2
-custom-build-images/*.img
-custom-build-images/*.raw
 rh-internal-doc/
 # Cursor/app debug logs (e.g. debug-b8567b.log); project logs go in logs/
 .cursor/debug*.log
