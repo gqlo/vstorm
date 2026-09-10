@@ -40,7 +40,7 @@ Dashboard is browse-first (batches → VMs → results → payload). No run-once
 - Pushing commands **into** the guest (no inbound HTTP/SSH/`virtctl` required)
 - Time-based fio as the only job definition (`FIO_TIME_BASED=1` remains supported as job length)
 - Embedding raw vstorm stdout into every guest result payload
-- Grafana / Prometheus wiring for guest workload JSON (existing Grafana under [`monitoring/dashboard/`](../monitoring/dashboard/) stays for CNV/Prom)
+- Grafana / Prometheus wiring for guest workload JSON (CNV/descheduler dashboards: [`ocp-lab/templates/dashboard/json/`](../../ocp-lab/templates/dashboard/json/); provision via [`monitoring/scripts/provision-grafana-dashboards.sh`](../monitoring/scripts/provision-grafana-dashboards.sh))
 - Host-side harvest of guest journals via `virtctl` / `helpers/log-vm`
 - Multi-user RBAC or multi-tenant isolation
 - TLS / HTTPS for the collector (v1 is plain **HTTP** on a trusted/lab network)

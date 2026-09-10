@@ -62,6 +62,7 @@ teardown() {
   [[ "$output" == *"Stopping 2 VM(s) (virtctl stop"* ]]
   [[ "$output" == *"Stop requests sent for 2 VM(s)"* ]]
   [[ "$output" == *"Waiting for 2 VM(s) to reach Stopped"* ]]
+  [[ "$output" == *"2/2 VMs stopped"* ]]
   [[ "$output" == *"All 2 VM(s) are Stopped"* ]]
   # The stop wait must happen before namespaces are deleted.
   stopped_line=$(grep -n "All 2 VM(s) are Stopped" <<< "$output" | head -1 | cut -d: -f1)
@@ -92,6 +93,8 @@ teardown() {
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"Waiting for 1 VM(s) to reach Stopped"* ]]
+  [[ "$output" == *"0/1 VMs stopped"* ]]
+  [[ "$output" == *"1/1 VMs stopped"* ]]
   [[ "$output" == *"All 1 VM(s) are Stopped"* ]]
   [[ "$output" != *"Timed out"* ]]
 

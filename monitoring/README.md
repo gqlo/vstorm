@@ -1,6 +1,6 @@
 # Monitoring (Grafana, Prometheus, CNV / descheduler)
 
-This directory holds **Grafana dashboards**, **Prometheus-related YAML**, and **helper scripts** for OpenShift / CNV and descheduler analysis.
+This directory holds **Prometheus-related YAML**, **helper scripts**, and **Grafana provisioning** for OpenShift / CNV and descheduler analysis. Grafana dashboard JSON lives in [`ocp-lab/templates/dashboard/json/`](../../ocp-lab/templates/dashboard/json/) (canonical copy).
 
 ## Contents
 
@@ -38,7 +38,8 @@ Use the **provisioning script** below to persist dashboard JSON across pod resta
 **Single dashboard (default namespace `dittybopper`):**
 
 ```bash
-./scripts/provision-grafana-dashboards.sh path/to/your.json
+./monitoring/scripts/provision-grafana-dashboards.sh \
+  ../ocp-lab/templates/dashboard/json/descheduler_cnv.json
 ```
 
 **Usage:** `[namespace] [dashboard1.json [dashboard2.json ...]]` — namespace is optional (default `dittybopper`); the first argument is only treated as a namespace if it does **not** end in `.json`.
@@ -165,7 +166,7 @@ Dittybopper often does not mount ConfigMaps labeled `grafana_dashboard=1` by def
 
 - `oc` logged into the cluster
 - Dittybopper (Grafana) deployed (this doc uses namespace `dittybopper`; adjust if yours differs)
-- Dashboard JSON (e.g. from `dashboard/` or exported from Grafana)
+- Dashboard JSON from [`ocp-lab/templates/dashboard/json/`](../../ocp-lab/templates/dashboard/json/) (e.g. `descheduler_cnv.json`) or exported from Grafana
 
 ### Step 1: Dashboard provider ConfigMap
 
@@ -195,7 +196,7 @@ Export from Grafana (**Share** → **Export**) if needed, then:
 
 ```bash
 oc create configmap grafana-dashboards-default \
-  --from-file=desched-cnv.json=monitoring/dashboard/desched-cnv.json \
+  --from-file=descheduler_cnv.json=../ocp-lab/templates/dashboard/json/descheduler_cnv.json \
   -n dittybopper
 ```
 

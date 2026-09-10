@@ -155,6 +155,15 @@ validate_subnet() {
     fi
 }
 
+# Reject basenames containing '.' — guest cloud-init heartbeats default to
+# hostname -s, which truncates at the first dot (e.g. dirty-mem-0.25-* →
+# dirty-mem-0), breaking per-VM result sync on the collector dashboard.
+validate_vm_basename() {
+    [[ -n "$VM_BASENAME" ]] || return 0
+    [[ "$VM_BASENAME" == *.* ]] || return 0
+    fatal "Invalid --basename '${VM_BASENAME}': must not contain '.' (guest hostname -s truncates at the first dot, breaking boot/result vm_name). Use e.g. dirty-mem-025 instead of dirty-mem-0.25"
+}
+
 validate_service_port() {
     local port=$1
     if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
@@ -279,6 +288,8 @@ validate_args() {
 	elif [[ -n "$DATA_DISK_SIZE" ]] && [[ ! "$DATA_DISK_SIZE" =~ ^[0-9]+([KMGT]i?)?$ ]]; then
 	    usage_error "Invalid --data-disk-size '$DATA_DISK_SIZE' (example: 20G or 50Gi; omit or use 0 for none)"
 	fi
+
+	validate_vm_basename
     fi
 }
 
@@ -340,7 +351,9 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
         --batch-id=ID           Batch ID for this run ($BATCH_ID)
                                 (auto-generated if not specified)
         --basename=name         VM name prefix (default: none; auto from
-                                | | | --datasource / --containerdisk)
+                                | | | --datasource / --containerdisk).
+                                | | | Must not contain '.' (breaks guest
+                                | | | hostname / result-server vm_name).
         --cores=N               VM CPU cores ($VM_CPU_CORES)
         --memory=N              VM memory size ($VM_MEMORY)
         --firmware=MODE         Guest boot firmware: bios or efi (default: $VM_FIRMWARE)
@@ -2423,6 +2436,7 @@ wait_for_batch_vms_stopped() {
     log_message "${C_BOLD}Waiting for ${C_VAL}${total}${C_RST}${C_BOLD} VM(s) to reach Stopped...${C_RST}"
 
     local vm_ns vm_name status key
+    local -i stopped
     while : ; do
 	while read -r vm_ns vm_name status ; do
 	    [[ -n "$vm_ns" && -n "$vm_name" ]] || continue
@@ -2432,12 +2446,17 @@ wait_for_batch_vms_stopped() {
 	    fi
 	done <<< "$(oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1, $2, $4}')"
 
+	stopped=$((total - ${#pending[@]}))
+	printf '\r  %s/%s VMs stopped   ' "$stopped" "$total"
+
 	if (( ${#pending[@]} == 0 )) ; then
+	    echo ""
 	    log_message "${C_OK}All ${C_VAL}${total}${C_RST} VM(s) are Stopped${C_RST}"
 	    return 0
 	fi
 
 	if (( SECONDS >= deadline )) ; then
+	    echo ""
 	    log_message "${C_WARN}Timed out after ${timeout}s waiting for VMs to stop (${#pending[@]}/${total} still not Stopped); proceeding with namespace delete anyway${C_RST}"
 	    return 1
 	fi
@@ -2450,7 +2469,7 @@ wait_for_batch_vms_stopped() {
 # Poll cluster-scoped storage still tied to a batch's namespaces after
 # `oc delete ns --wait=false` returns, refreshing counts every
 # DELETE_POLL_INTERVAL (default 2s) until namespaces, PVCs, PVs, and
-# VolumeAttachments all reach zero, or DELETE_POLL_TIMEOUT (default 7200s)
+# VolumeAttachments all reach zero, or DELETE_POLL_TIMEOUT (default 14400s)
 # is hit. PVs and VolumeAttachments are cluster-scoped and carry no
 # batch-id label, so they are correlated to the batch via the namespace
 # naming pattern ({batch}-ns-{N}) instead (PVs via spec.claimRef.namespace,
@@ -2459,7 +2478,7 @@ wait_for_batch_vms_stopped() {
 watch_batch_delete_cleanup() {
     local batch=$1
     local -i interval=${DELETE_POLL_INTERVAL:-2}
-    local -i timeout=${DELETE_POLL_TIMEOUT:-7200}
+    local -i timeout=${DELETE_POLL_TIMEOUT:-14400}
     local -i deadline=$((SECONDS + timeout))
     local ns_pat="^${batch}-ns-[0-9]+\$"
 
@@ -2569,6 +2588,7 @@ wait_for_namespace_vms_stopped() {
     log_message "${C_BOLD}Waiting for ${C_VAL}${total}${C_RST}${C_BOLD} VM(s) in ${C_VAL}${ns}${C_RST}${C_BOLD} to reach Stopped...${C_RST}"
 
     local vm_name status key
+    local -i stopped
     while : ; do
 	while read -r vm_name status ; do
 	    [[ -n "$vm_name" ]] || continue
@@ -2578,12 +2598,17 @@ wait_for_namespace_vms_stopped() {
 	    fi
 	done <<< "$(oc get vm -n "$ns" --no-headers 2>/dev/null | awk '{print $1, $3}')"
 
+	stopped=$((total - ${#pending[@]}))
+	printf '\r  %s/%s VMs stopped   ' "$stopped" "$total"
+
 	if (( ${#pending[@]} == 0 )) ; then
+	    echo ""
 	    log_message "${C_OK}All ${C_VAL}${total}${C_RST} VM(s) in ${C_VAL}${ns}${C_RST} are Stopped${C_RST}"
 	    return 0
 	fi
 
 	if (( SECONDS >= deadline )) ; then
+	    echo ""
 	    log_message "${C_WARN}Timed out after ${timeout}s waiting for VMs in ${C_VAL}${ns}${C_RST} to stop (${#pending[@]}/${total} still not Stopped); proceeding with namespace delete anyway${C_RST}"
 	    return 1
 	fi
@@ -2654,7 +2679,7 @@ stop_namespace_vms() {
 watch_namespace_delete_cleanup() {
     local ns=$1
     local -i interval=${DELETE_POLL_INTERVAL:-2}
-    local -i timeout=${DELETE_POLL_TIMEOUT:-7200}
+    local -i timeout=${DELETE_POLL_TIMEOUT:-14400}
     local -i deadline=$((SECONDS + timeout))
     local ns_pat="^${ns}\$"
 

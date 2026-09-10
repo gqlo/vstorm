@@ -416,6 +416,67 @@
     return b ? b + p : p;
   }
 
+  /** Default TTL for in-memory GET response cache (Option A). */
+  const DEFAULT_API_CACHE_TTL_MS = 30_000;
+
+  function apiCacheKey(apiBase, method, path) {
+    const m = String(method || "GET").toUpperCase();
+    const p = path.startsWith("/") ? path : "/" + path;
+    return `${normalizeApiBase(apiBase)}|${m}|${p}`;
+  }
+
+  function cloneJson(value) {
+    if (value == null) return value;
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  /** In-memory GET cache with TTL (fresh hit returns data; stale/miss returns null). */
+  function createApiCache(options) {
+    const ttlMs =
+      options && options.ttlMs != null ? Number(options.ttlMs) : DEFAULT_API_CACHE_TTL_MS;
+    const store = new Map();
+
+    function get(apiBase, method, path, now) {
+      const ts = now != null ? Number(now) : Date.now();
+      const key = apiCacheKey(apiBase, method, path);
+      const hit = store.get(key);
+      if (!hit) return null;
+      if (ts - hit.fetchedAt >= ttlMs) {
+        store.delete(key);
+        return null;
+      }
+      return cloneJson(hit.data);
+    }
+
+    function set(apiBase, method, path, data, now) {
+      const key = apiCacheKey(apiBase, method, path);
+      store.set(key, {
+        data: cloneJson(data),
+        fetchedAt: now != null ? Number(now) : Date.now(),
+      });
+    }
+
+    function clear() {
+      store.clear();
+    }
+
+    function invalidatePathPrefix(pathPrefix) {
+      const needle = pathPrefix.startsWith("/") ? pathPrefix : "/" + pathPrefix;
+      for (const key of store.keys()) {
+        if (key.includes(needle)) store.delete(key);
+      }
+    }
+
+    return {
+      ttlMs,
+      get,
+      set,
+      clear,
+      invalidatePathPrefix,
+      apiCacheKey,
+    };
+  }
+
   const api = {
     escapeHtml,
     fmtTs,
@@ -439,6 +500,9 @@
     slicePage,
     normalizeApiBase,
     apiUrl,
+    DEFAULT_API_CACHE_TTL_MS,
+    apiCacheKey,
+    createApiCache,
   };
 
   root.WorkloadDashboardLib = api;

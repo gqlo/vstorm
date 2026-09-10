@@ -388,3 +388,46 @@ describe("normalizeApiBase / apiUrl", () => {
     );
   });
 });
+
+describe("createApiCache", () => {
+  it("returns null on miss and cloned data on fresh hit", () => {
+    const cache = lib.createApiCache({ ttlMs: 30_000 });
+    assert.equal(cache.get("http://lab:8080", "GET", "/v1/batches?archived=0"), null);
+    cache.set("http://lab:8080", "GET", "/v1/batches?archived=0", { items: [{ batch_id: "a1" }] }, 1000);
+    const hit = cache.get("http://lab:8080", "GET", "/v1/batches?archived=0", 1010);
+    assert.deepEqual(hit, { items: [{ batch_id: "a1" }] });
+    hit.items[0].batch_id = "mutated";
+    const hit2 = cache.get("http://lab:8080", "GET", "/v1/batches?archived=0", 1020);
+    assert.equal(hit2.items[0].batch_id, "a1");
+  });
+
+  it("expires entries after TTL", () => {
+    const cache = lib.createApiCache({ ttlMs: 1000 });
+    cache.set("http://lab:8080", "GET", "/v1/batches", { items: [] }, 1000);
+    assert.notEqual(cache.get("http://lab:8080", "GET", "/v1/batches", 1500), null);
+    assert.equal(cache.get("http://lab:8080", "GET", "/v1/batches", 2001), null);
+  });
+
+  it("keys include api base, method, and path", () => {
+    const cache = lib.createApiCache();
+    assert.equal(
+      cache.apiCacheKey("http://lab:8080/", "get", "v1/batches"),
+      "http://lab:8080|GET|/v1/batches"
+    );
+    assert.equal(
+      cache.apiCacheKey("", "GET", "/healthz"),
+      "|GET|/healthz"
+    );
+  });
+
+  it("invalidatePathPrefix removes matching entries", () => {
+    const cache = lib.createApiCache({ ttlMs: 60_000 });
+    cache.set("", "GET", "/v1/batches", { items: [] }, 1);
+    cache.set("", "GET", "/v1/batches/a1", { batch_id: "a1" }, 1);
+    cache.set("", "GET", "/v1/timestamps", { items: [] }, 1);
+    cache.invalidatePathPrefix("/v1/batches");
+    assert.equal(cache.get("", "GET", "/v1/batches", 2), null);
+    assert.equal(cache.get("", "GET", "/v1/batches/a1", 2), null);
+    assert.notEqual(cache.get("", "GET", "/v1/timestamps", 2), null);
+  });
+});

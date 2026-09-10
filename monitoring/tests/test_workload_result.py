@@ -895,6 +895,28 @@ class TestStoreQueries(unittest.TestCase):
         self.assertEqual(row["api_server"], "https://api.legacy.test:6443")
         self.assertEqual(json.loads(row["namespaces_json"]), ["ns"])
 
+    def test_list_batches_uses_denormalized_stats_without_cycle_scan(self) -> None:
+        calls = {"n": 0}
+        orig = self.store._cycle_stats
+
+        def counting_stats(batch_id: str):
+            calls["n"] += 1
+            return orig(batch_id)
+
+        self.store._cycle_stats = counting_stats  # type: ignore[method-assign]
+        try:
+            self.store.list_batches(q="q1")
+            self.assertEqual(calls["n"], 0)
+        finally:
+            self.store._cycle_stats = orig  # type: ignore[method-assign]
+
+        row = self.store._conn.execute(
+            "SELECT list_sort_at, vm_summary_json FROM batches WHERE batch_id = ?",
+            ("q1",),
+        ).fetchone()
+        self.assertIsNotNone(row["list_sort_at"])
+        self.assertIsNotNone(row["vm_summary_json"])
+
     def test_list_batch_vms_paginates_without_full_payload(self) -> None:
         vms = [f"ns/vm-{i:04d}" for i in range(250)]
         self.store.ingest(

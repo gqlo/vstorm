@@ -5,6 +5,7 @@ const state = {
   timer: null,
   downloadUrl: null,
   selectedBatches: new Set(),
+  bypassCacheOnce: false,
   filters: {
     q: "",
     archived: "0",
@@ -42,7 +43,17 @@ const {
   slicePage,
   normalizeApiBase,
   apiUrl,
+  createApiCache,
 } = globalThis.WorkloadDashboardLib;
+
+const apiCache = createApiCache();
+
+function invalidateApiCacheAfterMutation(path) {
+  if (String(path || "").startsWith("/v1/")) {
+    apiCache.invalidatePathPrefix("/v1/batches");
+    apiCache.invalidatePathPrefix("/v1/timestamps");
+  }
+}
 
 function getStoredToken() {
   try {
@@ -105,6 +116,16 @@ function currentApiBase() {
 }
 
 async function api(path, opts = {}) {
+  const method = (opts.method || "GET").toUpperCase();
+  const bypassCache = Boolean(opts.bypassCache || state.bypassCacheOnce);
+  if (state.bypassCacheOnce) state.bypassCacheOnce = false;
+  const apiBase = currentApiBase();
+
+  if (method === "GET" && !bypassCache) {
+    const cached = apiCache.get(apiBase, method, path);
+    if (cached !== null) return cached;
+  }
+
   const headers = {
     Accept: "application/json",
     ...(opts.body ? { "Content-Type": "application/json" } : {}),
@@ -146,6 +167,11 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) {
     throw new Error((data && data.error) || res.statusText || "request failed");
+  }
+  if (method === "GET") {
+    apiCache.set(apiBase, method, path, data);
+  } else {
+    invalidateApiCacheAfterMutation(path);
   }
   return data;
 }
@@ -1603,6 +1629,7 @@ function setupApiBase() {
   const apply = () => {
     setStoredApiBase(input.value);
     input.value = currentApiBase();
+    apiCache.clear();
     render();
   };
   btn.onclick = apply;
@@ -1615,7 +1642,10 @@ function setupApiBase() {
 }
 
 function setupRefresh() {
-  $("#btn-refresh").onclick = () => render();
+  $("#btn-refresh").onclick = () => {
+    state.bypassCacheOnce = true;
+    render();
+  };
   const box = $("#auto-refresh");
   const arm = () => {
     if (state.timer) clearInterval(state.timer);
