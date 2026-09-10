@@ -370,6 +370,35 @@ class Store:
             self._conn.execute("ALTER TABLE batches ADD COLUMN namespaces_json TEXT")
         if "summary_json" not in batch_cols:
             self._conn.execute("ALTER TABLE batches ADD COLUMN summary_json TEXT")
+        list_stat_cols = {
+            "cycle_count": "INTEGER",
+            "event_count": "INTEGER",
+            "error_count": "INTEGER",
+            "vms_reporting": "INTEGER",
+            "iops_avg": "REAL",
+            "iops_p50": "REAL",
+            "iops_p99": "REAL",
+            "bw_avg": "REAL",
+            "bw_p50": "REAL",
+            "bw_p99": "REAL",
+            "fingerprint": "TEXT",
+            "first_cycle_at": "INTEGER",
+            "last_cycle_at": "INTEGER",
+            "vm_summary_json": "TEXT",
+            "list_sort_at": "INTEGER",
+        }
+        added_list_stats = False
+        for col, col_type in list_stat_cols.items():
+            if col not in batch_cols:
+                self._conn.execute(f"ALTER TABLE batches ADD COLUMN {col} {col_type}")
+                added_list_stats = True
+        if added_list_stats or self._conn.execute(
+            "SELECT 1 FROM batches WHERE list_sort_at IS NULL LIMIT 1"
+        ).fetchone():
+            self._backfill_batch_list_stats_columns()
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_batches_list ON batches(archived, list_sort_at)"
+        )
         pol_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(vm_policies)")}
         if "last_poll_at" not in pol_cols:
             self._conn.execute("ALTER TABLE vm_policies ADD COLUMN last_poll_at INTEGER")
@@ -603,6 +632,11 @@ class Store:
                     batch_id, vm_for_policy, agent_state, vmi_phase=vmi_phase_s
                 )
 
+        if _is_manifest(record_type) or _is_result(record_type) or _is_error(record_type):
+            self._refresh_batch_list_stats(batch_id)
+        elif _is_heartbeat(record_type):
+            self._refresh_batch_vm_summary(batch_id)
+
         return {"result_id": result_id, "batch_id": batch_id, "file_path": rel_path}
 
     def _policy_row_to_dict(self, row: sqlite3.Row | None, batch_id: str, vm_name: str) -> dict[str, Any]:
@@ -761,6 +795,7 @@ class Store:
         *,
         mode: str,
         remaining: int | None = None,
+        _refresh_list: bool = True,
     ) -> dict[str, Any]:
         mode = mode.strip().lower()
         if mode not in ("idle", "once", "count", "forever", "stop"):
@@ -810,6 +845,8 @@ class Store:
                 (batch_id, now),
             )
             self._conn.commit()
+        if _refresh_list:
+            self._refresh_batch_vm_summary(batch_id)
         return self.get_policy(batch_id, vm_name)
 
     def set_batch_policy(
@@ -859,9 +896,16 @@ class Store:
         if not names:
             raise ValueError("no VMs known for this batch yet")
         items = [
-            self.set_policy(batch_id, name, mode=mode, remaining=remaining)
+            self.set_policy(
+                batch_id,
+                name,
+                mode=mode,
+                remaining=remaining,
+                _refresh_list=False,
+            )
             for name in sorted(names)
         ]
+        self._refresh_batch_vm_summary(batch_id)
         return {"batch_id": batch_id, "updated": len(items), "items": items}
 
     def _consume_cycle_policy(self, batch_id: str, vm_name: str) -> None:
@@ -889,6 +933,312 @@ class Store:
             )
             self._conn.commit()
 
+    _LIST_STAT_KEYS = (
+        "cycle_count",
+        "event_count",
+        "error_count",
+        "vms_reporting",
+        "iops_avg",
+        "iops_p50",
+        "iops_p99",
+        "bw_avg",
+        "bw_p50",
+        "bw_p99",
+        "fingerprint",
+        "first_cycle_at",
+        "last_cycle_at",
+    )
+    _LIST_ITEM_DROP_KEYS = frozenset(
+        {
+            "namespaces_json",
+            "summary_json",
+            "vm_summary_json",
+            "list_sort_at",
+        }
+    )
+
+    def _row_val(self, row: sqlite3.Row | dict[str, Any], key: str) -> Any:
+        if isinstance(row, sqlite3.Row):
+            return row[key] if key in row.keys() else None
+        return row.get(key)
+
+    def _stats_from_batch_row(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        return {key: self._row_val(row, key) for key in self._LIST_STAT_KEYS}
+
+    def _backfill_batch_list_stats_columns(self) -> None:
+        """Populate denormalized list columns from results (bulk SQL, no manifest reads)."""
+        self._conn.execute(
+            """
+            UPDATE batches SET
+                cycle_count = (
+                    SELECT COUNT(*) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                ),
+                event_count = (
+                    SELECT COUNT(*) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('error', 'event')
+                ),
+                error_count = (
+                    SELECT COUNT(*) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND (
+                        (r.status IS NOT NULL AND r.status != 'ok')
+                        OR (r.fio_rc IS NOT NULL AND r.fio_rc != 0)
+                      )
+                ),
+                vms_reporting = (
+                    SELECT COUNT(DISTINCT r.vm_name) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND r.vm_name IS NOT NULL
+                ),
+                iops_avg = (
+                    SELECT AVG(r.iops) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND r.iops IS NOT NULL
+                ),
+                bw_avg = (
+                    SELECT AVG(r.bw_bytes) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND r.bw_bytes IS NOT NULL
+                ),
+                first_cycle_at = (
+                    SELECT MIN(r.started_at) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND r.started_at IS NOT NULL
+                ),
+                last_cycle_at = (
+                    SELECT MAX(COALESCE(r.stopped_at, r.started_at, 0)) FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                ),
+                fingerprint = (
+                    SELECT r.fingerprint FROM results r
+                    WHERE r.batch_id = batches.batch_id
+                      AND r.record_type IN ('result', 'cycle')
+                      AND r.fingerprint IS NOT NULL
+                    ORDER BY COALESCE(r.stopped_at, r.started_at, r.created_at) DESC
+                    LIMIT 1
+                ),
+                list_sort_at = COALESCE(
+                    started_at,
+                    (
+                        SELECT MIN(r.started_at) FROM results r
+                        WHERE r.batch_id = batches.batch_id
+                          AND r.record_type IN ('result', 'cycle')
+                          AND r.started_at IS NOT NULL
+                    ),
+                    updated_at,
+                    0
+                )
+            WHERE list_sort_at IS NULL
+            """
+        )
+        self._conn.commit()
+
+    def _refresh_batch_vm_summary(self, batch_id: str) -> None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT total_vms FROM batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            total_vms = row["total_vms"] if row else None
+            vm_summary = self._list_vm_summary(batch_id, total_vms)
+            self._conn.execute(
+                "UPDATE batches SET vm_summary_json = ? WHERE batch_id = ?",
+                (json.dumps(vm_summary), batch_id),
+            )
+            self._conn.commit()
+
+    def _refresh_batch_list_stats(self, batch_id: str) -> None:
+        with self._lock:
+            stats = self._cycle_stats(batch_id)
+            row = self._conn.execute(
+                "SELECT total_vms, started_at, updated_at FROM batches WHERE batch_id = ?",
+                (batch_id,),
+            ).fetchone()
+            total_vms = row["total_vms"] if row else None
+            vm_summary = self._list_vm_summary(batch_id, total_vms)
+            sort_at = (
+                (row["started_at"] if row else None)
+                or stats.get("first_cycle_at")
+                or (row["updated_at"] if row else None)
+                or 0
+            )
+            self._conn.execute(
+                """
+                UPDATE batches SET
+                    cycle_count = ?, event_count = ?, error_count = ?, vms_reporting = ?,
+                    iops_avg = ?, iops_p50 = ?, iops_p99 = ?,
+                    bw_avg = ?, bw_p50 = ?, bw_p99 = ?,
+                    fingerprint = ?, first_cycle_at = ?, last_cycle_at = ?,
+                    vm_summary_json = ?, list_sort_at = ?
+                WHERE batch_id = ?
+                """,
+                (
+                    stats["cycle_count"],
+                    stats["event_count"],
+                    stats["error_count"],
+                    stats["vms_reporting"],
+                    stats["iops_avg"],
+                    stats["iops_p50"],
+                    stats["iops_p99"],
+                    stats["bw_avg"],
+                    stats["bw_p50"],
+                    stats["bw_p99"],
+                    stats["fingerprint"],
+                    stats["first_cycle_at"],
+                    stats["last_cycle_at"],
+                    json.dumps(vm_summary),
+                    int(sort_at),
+                    batch_id,
+                ),
+            )
+            self._conn.commit()
+
+    def _batch_list_date_bounds(
+        self,
+        *,
+        today: str | None,
+        date: str | None,
+        date_from: str | None,
+        date_to: str | None,
+    ) -> tuple[int | None, int | None]:
+        start_bound: int | None = None
+        end_bound: int | None = None
+        today_flag = str(today or "").strip().lower() in ("1", "true", "yes")
+        if today_flag:
+            day = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+            start_bound, end_bound = _day_bounds_utc(day)
+        elif date and str(date).strip():
+            try:
+                start_bound, end_bound = _day_bounds_utc(str(date).strip())
+            except ValueError:
+                pass
+        else:
+            if date_from and str(date_from).strip():
+                try:
+                    start_bound, _ = _day_bounds_utc(str(date_from).strip())
+                except ValueError:
+                    pass
+            if date_to and str(date_to).strip():
+                try:
+                    _, end_bound = _day_bounds_utc(str(date_to).strip())
+                except ValueError:
+                    pass
+        return start_bound, end_bound
+
+    def _batch_list_sql_filters(
+        self,
+        *,
+        q: str | None,
+        archived: str | None,
+        basename: str | None,
+        batch_id: str | None,
+        namespace: str | None,
+        api_server: str | None,
+        start_bound: int | None,
+        end_bound: int | None,
+    ) -> tuple[str, list[Any]]:
+        clauses = ["1=1"]
+        args: list[Any] = []
+        if archived == "1":
+            clauses.append("archived = 1")
+        elif archived == "0":
+            clauses.append("archived = 0")
+        if basename:
+            clauses.append("basename = ?")
+            args.append(basename)
+        if batch_id:
+            clauses.append("LOWER(batch_id) LIKE ?")
+            args.append(f"%{batch_id.lower()}%")
+        if namespace:
+            clauses.append("LOWER(COALESCE(namespaces_json, '')) LIKE ?")
+            args.append(f"%{namespace.lower()}%")
+        if api_server:
+            clauses.append("LOWER(COALESCE(api_server, '')) LIKE ?")
+            args.append(f"%{api_server.lower()}%")
+        if q:
+            like = f"%{q.lower()}%"
+            clauses.append(
+                """(
+                    LOWER(batch_id) LIKE ? OR LOWER(COALESCE(basename, '')) LIKE ?
+                    OR LOWER(COALESCE(cloudinit, '')) LIKE ? OR LOWER(COALESCE(label, '')) LIKE ?
+                    OR LOWER(COALESCE(api_server, '')) LIKE ?
+                    OR LOWER(COALESCE(namespaces_json, '')) LIKE ?
+                )"""
+            )
+            args.extend([like, like, like, like, like, like])
+        sort_expr = "COALESCE(started_at, first_cycle_at, updated_at, 0)"
+        if start_bound is not None:
+            clauses.append(f"{sort_expr} >= ?")
+            args.append(start_bound)
+        if end_bound is not None:
+            clauses.append(f"{sort_expr} < ?")
+            args.append(end_bound)
+        return " AND ".join(clauses), args
+
+    def _batch_list_facets(self) -> dict[str, list[str]]:
+        facet_api: set[str] = set()
+        facet_ns: set[str] = set()
+        facet_batch: set[str] = set()
+        for row in self._conn.execute(
+            "SELECT batch_id, api_server, namespaces_json FROM batches"
+        ):
+            facet_batch.add(str(row["batch_id"]))
+            if row["api_server"]:
+                facet_api.add(str(row["api_server"]).strip())
+            raw_ns = row["namespaces_json"]
+            if isinstance(raw_ns, str) and raw_ns.strip():
+                try:
+                    parsed = json.loads(raw_ns)
+                    if isinstance(parsed, list):
+                        for ns in parsed:
+                            if ns is not None and str(ns).strip():
+                                facet_ns.add(str(ns))
+                except json.JSONDecodeError:
+                    pass
+        return {
+            "batch_ids": sorted(facet_batch),
+            "namespaces": sorted(facet_ns),
+            "api_servers": sorted(facet_api),
+        }
+
+    def _vm_summary_from_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        raw = row["vm_summary_json"] if "vm_summary_json" in row.keys() else None
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        return {}
+
+    def _batch_list_item(self, row: sqlite3.Row) -> dict[str, Any]:
+        batch_id = row["batch_id"]
+        if "vm_summary_json" in row.keys() and row["vm_summary_json"] is None:
+            self._refresh_batch_vm_summary(batch_id)
+            row = self._conn.execute(
+                "SELECT * FROM batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            assert row is not None
+        namespaces, api = self._batch_list_meta(row)
+        item = dict(row)
+        item["archived"] = bool(row["archived"])
+        item.update(self._stats_from_batch_row(row))
+        item["namespaces"] = namespaces
+        item["api_server"] = api
+        item["vm_summary"] = self._vm_summary_from_row(row)
+        for key in self._LIST_ITEM_DROP_KEYS:
+            item.pop(key, None)
+        return item
+
     def list_batches(
         self,
         *,
@@ -905,121 +1255,38 @@ class Store:
     ) -> dict[str, Any]:
         """Return filtered batch list plus filter facets from the full inventory.
 
-        Uses denormalized list metadata (api_server, namespaces_json) and SQL-based
-        vm_summary so listing never loads full manifest payloads.
+        Uses denormalized list columns (cycle stats + vm_summary_json) and SQL
+        filters so listing never scans all results or loads manifest payloads.
         """
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM batches").fetchall()
-
-            # Facets (unfiltered inventory) for UI dropdowns.
-            facet_api: set[str] = set()
-            facet_ns: set[str] = set()
-            facet_batch: set[str] = set()
-
-            enriched: list[dict[str, Any]] = []
-            for row in rows:
-                namespaces, api = self._batch_list_meta(row)
-                facet_batch.add(str(row["batch_id"]))
-                if api:
-                    facet_api.add(api)
-                for ns in namespaces:
-                    facet_ns.add(ns)
-
-                stats = self._cycle_stats(row["batch_id"])
-                item = dict(row)
-                item["archived"] = bool(row["archived"])
-                item.update(stats)
-                item["namespaces"] = namespaces
-                item["api_server"] = api
-                item["vm_summary"] = self._list_vm_summary(
-                    row["batch_id"], row["total_vms"]
-                )
-                # Drop raw JSON column from API response.
-                item.pop("namespaces_json", None)
-                sort_ts = row["started_at"] or stats.get("first_cycle_at") or row["updated_at"] or 0
-                item["_sort"] = sort_ts
-                enriched.append(item)
-
-            # Date window (UTC calendar days). today=1 wins over date=YYYY-MM-DD.
-            start_bound: int | None = None
-            end_bound: int | None = None
-            today_flag = str(today or "").strip().lower() in ("1", "true", "yes")
-            if today_flag:
-                day = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-                start_bound, end_bound = _day_bounds_utc(day)
-            elif date and str(date).strip():
-                try:
-                    start_bound, end_bound = _day_bounds_utc(str(date).strip())
-                except ValueError:
-                    pass
-            else:
-                if date_from and str(date_from).strip():
-                    try:
-                        start_bound, _ = _day_bounds_utc(str(date_from).strip())
-                    except ValueError:
-                        pass
-                if date_to and str(date_to).strip():
-                    try:
-                        _, end_bound = _day_bounds_utc(str(date_to).strip())
-                    except ValueError:
-                        pass
-
-            out: list[dict[str, Any]] = []
-            for item in enriched:
-                if archived == "1" and not item["archived"]:
-                    continue
-                if archived == "0" and item["archived"]:
-                    continue
-                if basename and (item.get("basename") or "") != basename:
-                    continue
-                if batch_id:
-                    needle = batch_id.lower()
-                    if needle not in str(item.get("batch_id") or "").lower():
-                        continue
-                if namespace:
-                    needle = namespace.lower()
-                    if not any(needle in ns.lower() for ns in item.get("namespaces") or []):
-                        continue
-                if api_server:
-                    needle = api_server.lower()
-                    api = (item.get("api_server") or "").lower()
-                    if needle not in api:
-                        continue
-                if q:
-                    blob = " ".join(
-                        str(x or "")
-                        for x in (
-                            item.get("batch_id"),
-                            item.get("basename"),
-                            item.get("cloudinit"),
-                            item.get("label"),
-                            item.get("api_server"),
-                            " ".join(item.get("namespaces") or []),
-                        )
-                    ).lower()
-                    if q.lower() not in blob:
-                        continue
-                ts = item.get("started_at") or item.get("_sort") or 0
-                try:
-                    ts_i = int(ts)
-                except (TypeError, ValueError):
-                    ts_i = 0
-                if start_bound is not None and ts_i < start_bound:
-                    continue
-                if end_bound is not None and ts_i >= end_bound:
-                    continue
-                out.append(item)
-
-            out.sort(key=lambda x: x.get("_sort") or 0, reverse=True)
-            for item in out:
-                item.pop("_sort", None)
+            facets = self._batch_list_facets()
+            start_bound, end_bound = self._batch_list_date_bounds(
+                today=today,
+                date=date,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            where_sql, where_args = self._batch_list_sql_filters(
+                q=q,
+                archived=archived,
+                basename=basename,
+                batch_id=batch_id,
+                namespace=namespace,
+                api_server=api_server,
+                start_bound=start_bound,
+                end_bound=end_bound,
+            )
+            rows = self._conn.execute(
+                f"""
+                SELECT * FROM batches
+                WHERE {where_sql}
+                ORDER BY COALESCE(list_sort_at, started_at, first_cycle_at, updated_at, 0) DESC
+                """,
+                where_args,
+            ).fetchall()
             return {
-                "items": out,
-                "facets": {
-                    "batch_ids": sorted(facet_batch),
-                    "namespaces": sorted(facet_ns),
-                    "api_servers": sorted(facet_api),
-                },
+                "items": [self._batch_list_item(row) for row in rows],
+                "facets": facets,
             }
 
     def _batch_list_meta(self, row: sqlite3.Row) -> tuple[list[str], str | None]:
@@ -1410,7 +1677,21 @@ class Store:
                 timing_src["pvc_count"] = row_total
         else:
             timing_src = None
-        stats = self._cycle_stats(batch_id)
+        if meta.get("list_sort_at") is not None:
+            stats = self._stats_from_batch_row(meta)
+            raw_vs = meta.get("vm_summary_json")
+            if isinstance(raw_vs, str) and raw_vs.strip():
+                try:
+                    vm_summary = json.loads(raw_vs)
+                    if not isinstance(vm_summary, dict):
+                        vm_summary = self._list_vm_summary(batch_id, meta.get("total_vms"))
+                except json.JSONDecodeError:
+                    vm_summary = self._list_vm_summary(batch_id, meta.get("total_vms"))
+            else:
+                vm_summary = self._list_vm_summary(batch_id, meta.get("total_vms"))
+        else:
+            stats = self._cycle_stats(batch_id)
+            vm_summary = self._list_vm_summary(batch_id, meta.get("total_vms"))
         timing = self._batch_timing_fields(timing_src)
         namespaces = _payload_namespaces(summary_payload)
         if not namespaces:
@@ -1437,7 +1718,7 @@ class Store:
             "api_server": api,
             "vms": [],
             "boot_stats": None,
-            "vm_summary": self._list_vm_summary(batch_id, meta.get("total_vms")),
+            "vm_summary": vm_summary,
             "series": [],
             "view": "summary",
         }
