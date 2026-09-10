@@ -80,7 +80,7 @@ vstorm -n --vms=10 --namespaces=2
 # 8. Delete all resources for a batch (prompts for confirmation)
 vstorm --delete=a3f7b2
 
-# 9. Delete ALL vstorm batches on the cluster
+# 9. Delete all namespaces containing VMs on the cluster
 vstorm --delete-all
 
 # 10. Layer 2 primary UDN + NodePort (--udn-l2 default subnet 10.132.10.0/16; --service defaults: nodeport, port 22, targetPort 22, nodePort from 32222)

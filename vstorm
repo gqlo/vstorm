@@ -399,9 +399,9 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
                                 | | | COMPONENT: virt-api, virt-controller,
                                 | | | virt-handler, virt-operator (default: all)
         --delete=BATCH_ID       Delete all resources for the given batch
-        --delete-all            Delete ALL vstorm batches and other VM
-                                | | | namespaces on the cluster (excludes
-                                | | | openshift/kube system namespaces)
+        --delete-all            Delete all namespaces containing VMs on the
+                                | | | cluster (excludes openshift/kube system
+                                | | | namespaces)
         -y / --yes              Skip confirmation prompt for delete operations
     Specify either --vms (total VMs) or --vms-per-namespace.
     --vms-per-namespace takes precedence.
@@ -2531,36 +2531,30 @@ is_protected_delete_namespace() {
 }
 
 ################################################################
-# List vstorm batch namespace names (batch-id label + {batch}-ns-{N} name).
-discover_vstorm_batch_namespaces() {
-    oc get ns -l batch-id --no-headers 2>/dev/null |
-	awk '{print $1}' |
-	grep -E '^[a-zA-Z0-9._-]+-ns-[0-9]+$' |
-	sort -u
-}
-
-################################################################
-# List namespaces that contain VMs but are not vstorm batch namespaces.
-# Args: $1 = newline-separated vstorm batch namespace names (may be empty)
-discover_non_vstorm_vm_namespaces() {
-    local vstorm_ns=$1
-    local -A vstorm_set=()
-    local ns
-
-    while read -r ns ; do
-	[[ -n "$ns" ]] && vstorm_set["$ns"]=1
-    done <<< "$vstorm_ns"
-
-    local all_vm_ns
+# List namespaces that contain VirtualMachines (excluding protected system ns).
+discover_vm_namespaces() {
+    local all_vm_ns ns
     all_vm_ns=$(oc get vm -A --no-headers 2>/dev/null | awk '{print $1}' | sort -u) || true
     [[ -z "$all_vm_ns" ]] && return 0
 
     while read -r ns ; do
 	[[ -z "$ns" ]] && continue
-	[[ -n "${vstorm_set[$ns]:-}" ]] && continue
 	is_protected_delete_namespace "$ns" && continue
 	echo "$ns"
     done <<< "$all_vm_ns"
+}
+
+################################################################
+# Return 0 if a namespace name matches a vstorm batch layout for batch ID.
+# Current batches: {batch}-ns-{N}.  Legacy batches used vm-{batch}-ns-{N}
+# while batch-id stayed the bare hex ID (e.g. batch-id=4b2d1f,
+# namespace=vm-4b2d1f-ns-1).
+is_vstorm_batch_namespace() {
+    local batch=$1 ns_name=$2
+    [[ -n "$batch" && -n "$ns_name" ]] || return 1
+    [[ "$ns_name" =~ ^${batch}-ns-[0-9]+$ ]] && return 0
+    [[ "$ns_name" =~ ^vm-${batch}-ns-[0-9]+$ ]] && return 0
+    return 1
 }
 
 ################################################################
@@ -2809,8 +2803,8 @@ delete_batch() {
     # may have been manually tagged with a batch-id label.
     local ns_name
     while read -r ns_name ; do
-	if [[ -n "$ns_name" && ! "$ns_name" =~ ^${batch}-ns-[0-9]+$ ]] ; then
-	    fatal "Refusing to delete namespace '$ns_name': does not match vstorm naming pattern ({batch}-ns-{N})"
+	if [[ -n "$ns_name" ]] && ! is_vstorm_batch_namespace "$batch" "$ns_name" ; then
+	    fatal "Refusing to delete namespace '$ns_name': does not match vstorm naming pattern ({batch}-ns-{N} or vm-{batch}-ns-{N})"
 	fi
     done <<< "$ns_list"
 
@@ -2839,77 +2833,47 @@ delete_batch() {
 }
 
 ################################################################
-# Delete ALL vstorm batches and other VM namespaces on the cluster
+# Delete all namespaces containing VirtualMachines on the cluster
 delete_all_batches() {
-    local vstorm_batch_ns all_batches other_vm_ns
+    local vm_ns_list
 
     if ((! wet_run)) ; then
 	cat <<-EOF
-	(dry-run) Would discover and delete:
-	  - all vstorm batches (oc get ns -l batch-id, {batch}-ns-{N} pattern)
-	  - all other namespaces containing VirtualMachines (oc get vm -A),
-	    excluding openshift/kube system namespaces and vstorm batch namespaces
+	(dry-run) Would discover and delete all namespaces containing
+	VirtualMachines (oc get vm -A), excluding openshift/kube system namespaces
 	EOF
 	return 0
     fi
 
-    vstorm_batch_ns=$(discover_vstorm_batch_namespaces)
-    all_batches=$(echo "$vstorm_batch_ns" |
-	grep -oP '^[a-zA-Z0-9._-]+(?=-ns-[0-9]+$)' |
-	sort -u) || true
-    other_vm_ns=$(discover_non_vstorm_vm_namespaces "$vstorm_batch_ns")
+    vm_ns_list=$(discover_vm_namespaces)
 
-    if [[ -z "$all_batches" && -z "$other_vm_ns" ]] ; then
-	echo "No vstorm batches or non-vstorm VM namespaces found on the cluster."
+    if [[ -z "$vm_ns_list" ]] ; then
+	echo "No VM namespaces found on the cluster."
 	return 0
     fi
 
-    if [[ -n "$all_batches" ]] ; then
-	echo "Found vstorm batches:"
-	local batch
-	while read -r batch ; do
-	    local ns_count vm_count
-	    ns_count=$(oc get ns -l batch-id="$batch" --no-headers 2>/dev/null | wc -l)
-	    vm_count=$(oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null | wc -l)
-	    echo "  $batch  ($ns_count namespaces, $vm_count VMs)"
-	done <<< "$all_batches"
-	echo ""
-    fi
-
-    if [[ -n "$other_vm_ns" ]] ; then
-	echo "Found non-vstorm VM namespaces:"
-	local ns vm_count
-	while read -r ns ; do
-	    vm_count=$(oc get vm -n "$ns" --no-headers 2>/dev/null | wc -l)
-	    echo "  $ns  ($vm_count VMs)"
-	done <<< "$other_vm_ns"
-	echo ""
-    fi
+    echo "Found VM namespaces:"
+    local ns vm_count
+    while read -r ns ; do
+	vm_count=$(oc get vm -n "$ns" --no-headers 2>/dev/null | wc -l)
+	echo "  $ns  ($vm_count VMs)"
+    done <<< "$vm_ns_list"
+    echo ""
 
     # Confirmation (unless --yes)
     if (( ! CONFIRM_DELETE )) ; then
-	read -r -p "Delete ALL batches and VM namespaces above? This is irreversible. [y/N] " confirm
+	read -r -p "Delete ALL VM namespaces above? This is irreversible. [y/N] " confirm
 	if [[ "${confirm,,}" != "y" ]] ; then
 	    echo "Aborted."
 	    return 0
 	fi
     fi
 
-    # Delete each vstorm batch; skip per-batch confirmation since we already confirmed
-    if [[ -n "$all_batches" ]] ; then
-	while read -r batch ; do
-	    delete_batch "$batch" skip-confirm
-	done <<< "$all_batches"
-    fi
+    while read -r ns ; do
+	delete_vm_namespace "$ns" skip-confirm
+    done <<< "$vm_ns_list"
 
-    # Delete each non-vstorm VM namespace
-    if [[ -n "$other_vm_ns" ]] ; then
-	while read -r ns ; do
-	    delete_vm_namespace "$ns" skip-confirm
-	done <<< "$other_vm_ns"
-    fi
-
-    log_message "${C_OK}All vstorm batches and VM namespaces deleted.${C_RST}"
+    log_message "${C_OK}All VM namespaces deleted.${C_RST}"
 }
 
 ################################################################
