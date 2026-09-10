@@ -87,6 +87,20 @@ setup_file() {
   [[ "$output" == *"Cloud-init file not found"* ]]
 }
 
+@test "ERR: basename containing dot is rejected (hostname -s truncation)" {
+  run bash "$VSTORM" -n --batch-id=err001b --datasource=rhel9 \
+    --basename=dirty-mem-0.25 --vms=1 --namespaces=1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid --basename 'dirty-mem-0.25'"* ]]
+  [[ "$output" == *"must not contain '.'"* ]]
+}
+
+@test "ERR: basename without dot is allowed" {
+  run bash "$VSTORM" -n --batch-id=err001c --datasource=rhel9 \
+    --basename=dirty-mem-025 --vms=1 --namespaces=1
+  [ "$status" -eq 0 ]
+}
+
 @test "--dv-url with empty DATASOURCE requires URL" {
   # --dv-url clears DATASOURCE; omitting URL value should fail
   run bash "$VSTORM" -n --batch-id=err002 --vms=1 --namespaces=1 --dv-url=

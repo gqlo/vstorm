@@ -155,6 +155,15 @@ validate_subnet() {
     fi
 }
 
+# Reject basenames containing '.' — guest cloud-init heartbeats default to
+# hostname -s, which truncates at the first dot (e.g. dirty-mem-0.25-* →
+# dirty-mem-0), breaking per-VM result sync on the collector dashboard.
+validate_vm_basename() {
+    [[ -n "$VM_BASENAME" ]] || return 0
+    [[ "$VM_BASENAME" == *.* ]] || return 0
+    fatal "Invalid --basename '${VM_BASENAME}': must not contain '.' (guest hostname -s truncates at the first dot, breaking boot/result vm_name). Use e.g. dirty-mem-025 instead of dirty-mem-0.25"
+}
+
 validate_service_port() {
     local port=$1
     if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
@@ -279,6 +288,8 @@ validate_args() {
 	elif [[ -n "$DATA_DISK_SIZE" ]] && [[ ! "$DATA_DISK_SIZE" =~ ^[0-9]+([KMGT]i?)?$ ]]; then
 	    usage_error "Invalid --data-disk-size '$DATA_DISK_SIZE' (example: 20G or 50Gi; omit or use 0 for none)"
 	fi
+
+	validate_vm_basename
     fi
 }
 
@@ -340,7 +351,9 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
         --batch-id=ID           Batch ID for this run ($BATCH_ID)
                                 (auto-generated if not specified)
         --basename=name         VM name prefix (default: none; auto from
-                                | | | --datasource / --containerdisk)
+                                | | | --datasource / --containerdisk).
+                                | | | Must not contain '.' (breaks guest
+                                | | | hostname / result-server vm_name).
         --cores=N               VM CPU cores ($VM_CPU_CORES)
         --memory=N              VM memory size ($VM_MEMORY)
         --firmware=MODE         Guest boot firmware: bios or efi (default: $VM_FIRMWARE)
