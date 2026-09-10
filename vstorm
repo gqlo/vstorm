@@ -2338,23 +2338,17 @@ PY
 }
 
 ################################################################
-# Gracefully stop all VMs in a batch (parallel `virtctl stop`) before
-# `oc delete ns` tears down their namespaces, instead of letting namespace
-# deletion abruptly kill running VMIs. Best-effort: a missing virtctl
-# binary, or an individual VM that's already stopped/gone, only logs a
-# warning -- it never blocks the delete. Runs in batches of STOP_PARALLEL
-# concurrent `virtctl stop` calls (default 200) to avoid PID/fd exhaustion
-# on very large batches. Once stop requests are sent, waits (best-effort,
-# see wait_for_batch_vms_stopped) for the VMs to actually reach Stopped.
-# Args: $1 = batch ID, $2 = newline-separated "namespace vm-name" pairs (may be empty)
-stop_batch_vms() {
-    local batch=$1
-    local vm_list=$2
-    [[ -n "$vm_list" ]] || return 0
+# Fire parallel `virtctl stop` for a VM list ("namespace name" pairs per line).
+# Returns 0 if stop requests were sent, 1 if stop was skipped (no virtctl,
+# empty list, or no VMs to stop) so callers can skip wait_for_vms_stopped.
+# Args: $1 = newline-separated "namespace vm-name" pairs (may be empty)
+stop_vms() {
+    local vm_list=$1
+    [[ -n "$vm_list" ]] || return 1
 
     if [[ -z "$(type -t virtctl)" ]]; then
 	log_message "${C_WARN}virtctl not found; skipping graceful VM stop before delete${C_RST}"
-	return 0
+	return 1
     fi
 
     local -a ns_arr=() name_arr=()
@@ -2366,7 +2360,7 @@ stop_batch_vms() {
     done <<< "$vm_list"
 
     local -i total=${#name_arr[@]}
-    ((total == 0)) && return 0
+    ((total == 0)) && return 1
 
     local -i parallel=${STOP_PARALLEL:-200}
     ((parallel < 1)) && parallel=1
@@ -2396,27 +2390,14 @@ stop_batch_vms() {
 	batch_start=$batch_end
     done
     log_message "${C_OK}Stop requests sent for ${C_VAL}${total}${C_RST} VM(s)${C_RST}"
-
-    # Best-effort: a timeout here only warns (inside the function); `|| true`
-    # keeps that non-zero status from tripping `set -e` and aborting the
-    # delete -- we still proceed to `oc delete ns` either way.
-    wait_for_batch_vms_stopped "$batch" "$vm_list" || true
+    return 0
 }
 
 ################################################################
-# Wait for all VMs in a batch to actually reach "Stopped" after
-# stop_batch_vms() fires parallel `virtctl stop` calls, before namespace
-# deletion proceeds. `virtctl stop` only submits the stop request -- the VM
-# still needs a few seconds to shut down its VMI -- so this polls
-# `oc get vm -l batch-id=...` every DELETE_POLL_INTERVAL (default 2s) until
-# every VM's printableStatus is Stopped, or STOP_WAIT_TIMEOUT (default 1800s)
-# is hit. Best-effort: on timeout it only warns and returns 1 -- callers
-# proceed with `oc delete ns` regardless, which forcibly cleans up whatever
-# is still shutting down.
-# Args: $1 = batch ID, $2 = newline-separated "namespace vm-name" pairs
-wait_for_batch_vms_stopped() {
-    local batch=$1
-    local vm_list=$2
+# Wait for VMs in vm_list to reach "Stopped" after stop_vms().
+# Args: $1 = newline-separated "namespace vm-name" pairs
+wait_for_vms_stopped() {
+    local vm_list=$1
     [[ -n "$vm_list" ]] || return 0
 
     local -A pending=()
@@ -2444,7 +2425,7 @@ wait_for_batch_vms_stopped() {
 	    if [[ "$status" == "Stopped" && -n "${pending[$key]:-}" ]] ; then
 		unset "pending[$key]"
 	    fi
-	done <<< "$(oc get vm -A -l batch-id="$batch" --no-headers 2>/dev/null | awk '{print $1, $2, $4}')"
+	done <<< "$(oc get vm -A --no-headers 2>/dev/null | awk '{print $1, $2, $4}')"
 
 	stopped=$((total - ${#pending[@]}))
 	printf '\r  %s/%s VMs stopped   ' "$stopped" "$total"
@@ -2463,6 +2444,40 @@ wait_for_batch_vms_stopped() {
 
 	sleep "$interval"
     done
+}
+
+################################################################
+# Gracefully stop all VMs in a batch (parallel `virtctl stop`) before
+# `oc delete ns` tears down their namespaces, instead of letting namespace
+# deletion abruptly kill running VMIs. Best-effort: a missing virtctl
+# binary, or an individual VM that's already stopped/gone, only logs a
+# warning -- it never blocks the delete. Runs in batches of STOP_PARALLEL
+# concurrent `virtctl stop` calls (default 200) to avoid PID/fd exhaustion
+# on very large batches. Once stop requests are sent, waits (best-effort,
+# see wait_for_vms_stopped) for the VMs to actually reach Stopped.
+# Args: $1 = batch ID (unused; kept for call-site compatibility),
+#        $2 = newline-separated "namespace vm-name" pairs (may be empty)
+stop_batch_vms() {
+    local vm_list=$2
+    if stop_vms "$vm_list"; then
+	wait_for_vms_stopped "$vm_list" || true
+    fi
+}
+
+################################################################
+# Wait for all VMs in a batch to actually reach "Stopped" after
+# stop_batch_vms() fires parallel `virtctl stop` calls, before namespace
+# deletion proceeds. `virtctl stop` only submits the stop request -- the VM
+# still needs a few seconds to shut down its VMI -- so this polls
+# `oc get vm -A` every DELETE_POLL_INTERVAL (default 2s) until every VM's
+# printableStatus is Stopped, or STOP_WAIT_TIMEOUT (default 1800s) is hit.
+# Best-effort: on timeout it only warns and returns 1 -- callers proceed
+# with `oc delete ns` regardless, which forcibly cleans up whatever is
+# still shutting down.
+# Args: $1 = batch ID (unused; kept for call-site compatibility),
+#        $2 = newline-separated "namespace vm-name" pairs
+wait_for_batch_vms_stopped() {
+    wait_for_vms_stopped "$2"
 }
 
 ################################################################
@@ -2542,6 +2557,26 @@ discover_vm_namespaces() {
 	is_protected_delete_namespace "$ns" && continue
 	echo "$ns"
     done <<< "$all_vm_ns"
+}
+
+################################################################
+# Build "namespace vm-name" lines for VMs in the given namespace list.
+# Args: $1 = newline-separated namespace names
+discover_vm_list() {
+    local vm_ns_list=$1
+    local -A ns_set=()
+    local ns name
+
+    [[ -z "$vm_ns_list" ]] && return 0
+    while read -r ns ; do
+	[[ -n "$ns" ]] && ns_set["$ns"]=1
+    done <<< "$vm_ns_list"
+
+    while read -r ns name ; do
+	[[ -n "$ns" && -n "$name" ]] || continue
+	[[ -n "${ns_set[$ns]:-}" ]] || continue
+	echo "$ns $name"
+    done <<< "$(oc get vm -A --no-headers 2>/dev/null | awk '{print $1, $2}')"
 }
 
 ################################################################
@@ -2714,8 +2749,64 @@ watch_namespace_delete_cleanup() {
 }
 
 ################################################################
+# Poll cluster-scoped storage still tied to a set of namespaces after delete.
+# Args: $1 = newline-separated namespace names
+watch_vm_namespaces_delete_cleanup() {
+    local ns_list=$1
+    local ns_file pv_names_file ns
+    local -i interval=${DELETE_POLL_INTERVAL:-2}
+    local -i timeout=${DELETE_POLL_TIMEOUT:-14400}
+    local -i deadline=$((SECONDS + timeout))
+
+    ns_file=$(mktemp)
+    printf '%s\n' "$ns_list" > "$ns_file"
+
+    log_message "${C_BOLD}Monitoring cleanup for VM namespaces (namespaces, PVCs, PVs, VolumeAttachments; refresh every ${interval}s)...${C_RST}"
+
+    local -i ns_n pvc_n pv_n va_n
+    while : ; do
+	ns_n=0
+	while read -r ns ; do
+	    [[ -z "$ns" ]] && continue
+	    ns_n=$((ns_n + $(oc get ns "$ns" --no-headers 2>/dev/null | wc -l)))
+	done < "$ns_file"
+
+	pvc_n=$(oc get pvc -A --no-headers 2>/dev/null |
+	    awk -v f="$ns_file" 'BEGIN{while((getline l < f) > 0) ns[l]=1} ns[$1]{c++} END{print c+0}')
+
+	pv_names_file=$(mktemp)
+	oc get pv -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.claimRef.namespace}{"\n"}{end}' 2>/dev/null |
+	    awk -v f="$ns_file" 'BEGIN{while((getline l < f) > 0) ns[l]=1} ns[$2]{print $1}' > "$pv_names_file"
+	pv_n=$(wc -l < "$pv_names_file")
+
+	va_n=$(oc get volumeattachment -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.source.persistentVolumeName}{"\n"}{end}' 2>/dev/null \
+	    | awk -v pvf="$pv_names_file" 'BEGIN{while((getline l < pvf) > 0) pv[l]=1} $2 in pv {c++} END{print c+0}')
+	rm -f "$pv_names_file"
+
+	printf '\r  namespaces=%-4s PVCs=%-4s PVs=%-4s VolumeAttachments=%-4s   ' \
+	    "$ns_n" "$pvc_n" "$pv_n" "$va_n"
+
+	if (( ns_n == 0 && pvc_n == 0 && pv_n == 0 && va_n == 0 )) ; then
+	    echo ""
+	    rm -f "$ns_file"
+	    log_message "${C_OK}All VM namespaces fully cleaned up${C_RST} (no leftover namespaces, PVCs, PVs, or VolumeAttachments)"
+	    return 0
+	fi
+
+	if (( SECONDS >= deadline )) ; then
+	    echo ""
+	    rm -f "$ns_file"
+	    log_message "${C_WARN}Timed out after ${timeout}s waiting for VM namespace cleanup; leftovers remain: namespaces=$ns_n PVCs=$pvc_n PVs=$pv_n VolumeAttachments=$va_n${C_RST}"
+	    return 1
+	fi
+
+	sleep "$interval"
+    done
+}
+
+################################################################
 # Delete a non-vstorm namespace and all VMs inside it.
-# Args: $1 = namespace, $2 = "skip-confirm" (optional, used by delete_all_batches)
+# Args: $1 = namespace, $2 = "skip-confirm" (optional)
 delete_vm_namespace() {
     local ns=$1
     local skip_confirm=${2:-}
@@ -2839,8 +2930,9 @@ delete_all_batches() {
 
     if ((! wet_run)) ; then
 	cat <<-EOF
-	(dry-run) Would discover and delete all namespaces containing
-	VirtualMachines (oc get vm -A), excluding openshift/kube system namespaces
+	(dry-run) Would discover VM namespaces (oc get vm -A), stop all VMs
+	across those namespaces, delete the namespaces, and monitor cleanup
+	(excludes openshift/kube system namespaces)
 	EOF
 	return 0
     fi
@@ -2853,11 +2945,15 @@ delete_all_batches() {
     fi
 
     echo "Found VM namespaces:"
-    local ns vm_count
+    local ns vm_count total_vms=0 ns_count=0
     while read -r ns ; do
 	vm_count=$(oc get vm -n "$ns" --no-headers 2>/dev/null | wc -l)
 	echo "  $ns  ($vm_count VMs)"
+	total_vms=$((total_vms + vm_count))
+	ns_count=$((ns_count + 1))
     done <<< "$vm_ns_list"
+    echo ""
+    echo "Total: $ns_count namespace(s), $total_vms VM(s)"
     echo ""
 
     # Confirmation (unless --yes)
@@ -2869,9 +2965,20 @@ delete_all_batches() {
 	fi
     fi
 
+    local vm_list
+    vm_list=$(discover_vm_list "$vm_ns_list")
+
+    if stop_vms "$vm_list"; then
+	wait_for_vms_stopped "$vm_list" || true
+    fi
+
+    log_message "Deleting ${C_VAL}${ns_count}${C_RST} VM namespace(s)..."
     while read -r ns ; do
-	delete_vm_namespace "$ns" skip-confirm
+	[[ -n "$ns" ]] || continue
+	oc delete ns "$ns" --wait=false
     done <<< "$vm_ns_list"
+
+    watch_vm_namespaces_delete_cleanup "$vm_ns_list"
 
     log_message "${C_OK}All VM namespaces deleted.${C_RST}"
 }

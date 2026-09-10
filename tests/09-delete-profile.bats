@@ -126,7 +126,7 @@ setup_file() {
   run bash "$VSTORM" -n --delete-all
   [ "$status" -eq 0 ]
   [[ "$output" == *"dry-run"* ]]
-  [[ "$output" == *"VirtualMachines"* ]]
+  [[ "$output" == *"stop all VMs"* ]]
   [[ "$output" == *"openshift/kube system namespaces"* ]]
 }
 

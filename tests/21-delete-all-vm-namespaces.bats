@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
-# Regression coverage for --delete-all discovering and deleting all namespaces
-# that contain VirtualMachines (excluding openshift/kube system namespaces).
+# Regression coverage for --delete-all: stop all VMs cluster-wide, then delete
+# all VM namespaces (excluding openshift/kube system namespaces).
 
 load 'helpers'
 
@@ -18,7 +18,6 @@ teardown() {
 }
 
 @test "delete-all: discovers and deletes VM namespace" {
-  ns_calls_file=$(mktemp)
   ticks_file=$(mktemp)
   stop_log=$(mktemp)
   echo 1 > "$ticks_file"
@@ -33,13 +32,13 @@ teardown() {
 
   [[ "$output" == *"Found VM namespaces:"* ]]
   [[ "$output" == *"my-vm-ns"* ]]
-  [[ "$output" == *"Stopping 1 VM(s) in my-vm-ns"* ]]
-  [[ "$output" == *"Deleting namespace 'my-vm-ns'"* ]]
-  [[ "$output" == *"Monitoring cleanup for namespace 'my-vm-ns'"* ]]
-  [[ "$output" == *"fully cleaned up"* ]]
+  [[ "$output" == *"Stopping 1 VM(s)"* ]]
+  [[ "$output" == *"Deleting 1 VM namespace(s)"* ]]
+  [[ "$output" == *"Monitoring cleanup for VM namespaces"* ]]
+  [[ "$output" == *"All VM namespaces fully cleaned up"* ]]
   grep -qx 'my-vm-ns/tvm-manual-1' "$stop_log"
 
-  rm -f "$ns_calls_file" "$ticks_file" "$stop_log"
+  rm -f "$ticks_file" "$stop_log"
 }
 
 @test "delete-all: skips openshift and kube system VM namespaces" {
@@ -60,8 +59,7 @@ my-other-ns vm1 5m Stopped False' \
   rm -f "$MOCK_CLEANUP_TICKS_FILE"
 }
 
-@test "delete-all: deletes vstorm and manual VM namespaces together" {
-  ns_calls_file=$(mktemp)
+@test "delete-all: stops VMs and deletes vstorm and manual namespaces together" {
   ticks_file=$(mktemp)
   stop_log=$(mktemp)
   echo 1 > "$ticks_file"
@@ -69,7 +67,6 @@ my-other-ns vm1 5m Stopped False' \
   MOCK_NS_LINES="delall1-ns-1" \
   MOCK_VM_LINES=$'delall1-ns-1 tvm-delall1-1 5m Stopped False
 other-ns tvm-other-1 5m Stopped False' \
-  MOCK_NS_CALLS_FILE="$ns_calls_file" \
   MOCK_LEFTOVER_NS="delall1-ns-1" \
   MOCK_CLEANUP_TICKS_FILE="$ticks_file" \
   MOCK_VIRTCTL_STOP_LOG="$stop_log" \
@@ -80,11 +77,13 @@ other-ns tvm-other-1 5m Stopped False' \
   [[ "$output" == *"Found VM namespaces:"* ]]
   [[ "$output" == *"delall1-ns-1  (1 VMs)"* ]]
   [[ "$output" == *"other-ns  (1 VMs)"* ]]
-  [[ "$output" != *"Found vstorm batches:"* ]]
+  [[ "$output" == *"Total: 2 namespace(s), 2 VM(s)"* ]]
+  [[ "$output" == *"Stopping 2 VM(s)"* ]]
+  [[ "$output" == *"Deleting 2 VM namespace(s)"* ]]
   grep -qx 'delall1-ns-1/tvm-delall1-1' "$stop_log"
   grep -qx 'other-ns/tvm-other-1' "$stop_log"
 
-  rm -f "$ns_calls_file" "$ticks_file" "$stop_log"
+  rm -f "$ticks_file" "$stop_log"
 }
 
 @test "delete-all: legacy vm-{batch}-ns namespaces are included" {
@@ -103,6 +102,7 @@ other-ns tvm-other-1 5m Stopped False' \
 
   [[ "$output" == *"Found VM namespaces:"* ]]
   [[ "$output" == *"vm-legacy1-ns-1  (1 VMs)"* ]]
+  [[ "$output" == *"Stopping 1 VM(s)"* ]]
   grep -qx 'vm-legacy1-ns-1/tvm-legacy1-1' "$stop_log"
 
   rm -f "$ticks_file" "$stop_log"
