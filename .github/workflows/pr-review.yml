@@ -1,0 +1,316 @@
+---
+# PR description auto-fill and Claude Code review (anthropics/claude-code-action).
+# Requires:
+#   - GCP_SA_KEY — full Google service account JSON (service_account_key_data)
+#   - Claude GitHub App (https://github.com/apps/claude) or /install-github-app
+# Both jobs use Vertex AI / Agent Platform (project itpc-ca-f4da0836ff).
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+concurrency:
+  group: claude-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  VERTEX_PROJECT_ID: itpc-ca-f4da0836ff
+  CLOUD_ML_REGION: global
+  VERTEX_MODEL: claude-sonnet-5
+
+jobs:
+  # Job 1: Claude narrative on open; Diff size on open and every push
+  summarize:
+    if: github.event.pull_request.draft == false && (github.event.action == 'opened' || github.event.action == 'synchronize')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        if: github.event.action == 'opened'
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          token_format: access_token
+
+      - name: Auto-fill PR description
+        uses: actions/github-script@v7
+        env:
+          GCP_ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          VERTEX_PROJECT_ID: ${{ env.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ env.CLOUD_ML_REGION }}
+          VERTEX_MODEL: ${{ env.VERTEX_MODEL }}
+        with:
+          script: |
+            const pull_number = context.payload.pull_request.number;
+            const prTitle = context.payload.pull_request.title;
+            const prBody = context.payload.pull_request.body || '';
+            const isOpen = context.payload.action === 'opened';
+
+            const hasContent = prBody.includes('[x]') ||
+              (prBody.includes('## Description') &&
+               prBody.split('## Description')[1]?.split('##')[0]?.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0);
+
+            const SKIP_PATTERNS = [
+              /pubspec\.lock$/, /\.lock$/,
+              /app_localizations(_(en|zh))?\.dart$/,
+              /\.g\.dart$/, /\.freezed\.dart$/, /\.min\.(js|css)$/
+            ];
+            const MAX_DIFF_SIZE = 12000;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+              per_page: 100
+            });
+
+            const categorize = (filename) => {
+              const f = filename.replace(/\\/g, '/');
+              if (/(^|\/)(\.cursor|\.github)(\/|$)/.test(f)) return 'other';
+              if (
+                /(^|\/)(test|tests|__tests__|e2e)(\/|$)/.test(f) ||
+                /_test\.dart$/.test(f) ||
+                /\.(test|spec)\.(ts|tsx|js|jsx|go)$/.test(f)
+              ) return 'test';
+              if (/(^|\/)docs(\/|$)/.test(f) || /\.(md|mdx)$/.test(f)) return 'docs';
+              if (
+                /(^|\/)(lib|src|api|app|cmd)(\/|$)/.test(f) ||
+                /\.(dart|go|ts|tsx|js|jsx|py)$/.test(f)
+              ) return 'code';
+              return 'other';
+            };
+
+            const empty = () => ({ files: 0, add: 0, del: 0 });
+            const cats = { test: empty(), docs: empty(), code: empty(), other: empty() };
+            for (const f of files) {
+              const c = cats[categorize(f.filename)];
+              c.files += 1;
+              c.add += f.additions || 0;
+              c.del += f.deletions || 0;
+            }
+            const total = empty();
+            for (const c of Object.values(cats)) {
+              total.files += c.files;
+              total.add += c.add;
+              total.del += c.del;
+            }
+            const line = (label, c) =>
+              `- **${label}:** ${c.files} files, +${c.add} / −${c.del}`;
+            const DIFF_SIZE_START = '<!-- diff-size:start -->';
+            const DIFF_SIZE_END = '<!-- diff-size:end -->';
+            const diffSizeSection = [
+              DIFF_SIZE_START,
+              '## Diff size',
+              line('Tests', cats.test),
+              line('Docs', cats.docs),
+              line('Non-test code', cats.code),
+              line('Other', cats.other),
+              line('Total', total),
+              DIFF_SIZE_END
+            ].join('\n');
+
+            const upsertDiffSize = (body) => {
+              const without = (body || '')
+                .replace(/\n?<!-- diff-size:start -->[\s\S]*?<!-- diff-size:end -->/g, '')
+                // Legacy unmarked Diff size: heading + metric bullets only.
+                .replace(/\n?## Diff size\n(?:- \*\*[^\n]*\n?)*/g, '')
+                .trim();
+              const marker = '<!-- This is an auto-generated comment: release notes by coderabbit.ai -->';
+              if (without.includes(marker)) {
+                return without.replace(marker, `${diffSizeSection}\n\n${marker}`);
+              }
+              return without ? `${without}\n\n${diffSizeSection}` : diffSizeSection;
+            };
+
+            let body = prBody;
+            let failReason = null;
+
+            // Narrative Claude fill only when the PR is first opened and empty.
+            // On Claude unavailability/failure, keep the original body and still
+            // run upsertDiffSize below; fail the job afterward if required.
+            if (isOpen && !hasContent) {
+              if (!process.env.GCP_ACCESS_TOKEN) {
+                failReason = 'GCP_SA_KEY secret is not set or GCP auth failed.';
+              } else {
+                const { data: commits } = await github.rest.pulls.listCommits({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number,
+                  per_page: 100
+                });
+                const commitMessages = commits.map(c => `- ${c.commit.message}`).join('\n');
+
+                const reviewable = files.filter(f =>
+                  f.patch &&
+                  !SKIP_PATTERNS.some(p => p.test(f.filename))
+                );
+
+                let diff = '';
+                for (const file of reviewable) {
+                  diff += `=== ${file.filename} (${file.status}, +${file.additions} -${file.deletions}) ===\n${file.patch}\n\n`;
+                }
+                if (diff.length > MAX_DIFF_SIZE) {
+                  diff = diff.substring(0, MAX_DIFF_SIZE) + '\n\n... (diff truncated)';
+                }
+
+                const prompt = [
+                  'Auto-fill a PR description. Analyze the title, commits, and diff below.',
+                  '',
+                  `PR Title: ${prTitle}`,
+                  '',
+                  'Commits:',
+                  commitMessages,
+                  '',
+                  'Diff:',
+                  diff,
+                  '',
+                  'Return ONLY markdown with these sections (do NOT add any text before the first ## header):',
+                  '',
+                  '## What type of PR is this?',
+                  'Mark applicable types with [x]: feat, fix, docs, refactor, test, ci, chore',
+                  '(Use format: - [x] `type` - Description)',
+                  '',
+                  '## Description',
+                  '2-4 sentences on what changed and why.',
+                  '',
+                  '## Changes Overview',
+                  'Brief bullet summary of files or areas changed.',
+                  '',
+                  '## How Has This Been Tested?',
+                  'Mark applicable with [x]: Unit tests, Manual testing, N/A',
+                  '(Use format: - [x] Item)',
+                  '',
+                  '## Checklist',
+                  'Mark applicable with [x]: code style, self-review, tests added, tests pass, docs updated, i18n (en + zh ARB)',
+                  '(Use format: - [x] Item)'
+                ].join('\n');
+
+                const projectId = process.env.VERTEX_PROJECT_ID;
+                const region = process.env.CLOUD_ML_REGION || 'global';
+                const model = process.env.VERTEX_MODEL;
+                const vertexUrl = region === 'global'
+                  ? `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/global/publishers/anthropic/models/${model}:rawPredict`
+                  : `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/anthropic/models/${model}:rawPredict`;
+
+                let apiResult;
+                try {
+                  const resp = await fetch(vertexUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${process.env.GCP_ACCESS_TOKEN}`
+                    },
+                    body: JSON.stringify({
+                      anthropic_version: 'vertex-2023-10-16',
+                      max_tokens: 2048,
+                      messages: [{ role: 'user', content: prompt }]
+                    })
+                  });
+                  if (!resp.ok) {
+                    const errorText = await resp.text();
+                    throw new Error(`HTTP ${resp.status}: ${errorText}`);
+                  }
+                  apiResult = await resp.json();
+                } catch (e) {
+                  failReason = `Vertex Claude request failed: ${e.message}`;
+                }
+
+                if (!failReason) {
+                  body = apiResult.content?.[0]?.text;
+                  if (!body) {
+                    core.warning('Empty response from Vertex Claude; writing Diff size only');
+                    body = prBody;
+                  } else {
+                    const firstHeaderIdx = body.search(/^## /m);
+                    if (firstHeaderIdx > 0) {
+                      const preamble = body.substring(0, firstHeaderIdx).trim();
+                      body = body.substring(firstHeaderIdx);
+                      if (preamble) {
+                        body = body.replace(/(## Description[^\n]*\n)/, `$1\n${preamble}\n`);
+                      }
+                    }
+                    body = body.replace(/^- \[ \] .+\n?/gm, '');
+                    body = body.replace(/\n{3,}/g, '\n\n').trim();
+                    console.log(`PR #${pull_number} description auto-filled by Claude (Vertex)`);
+                  }
+                }
+              }
+            } else if (isOpen) {
+              console.log('PR body already has content, skipping Claude auto-fill');
+            }
+
+            body = upsertDiffSize(body);
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+              body
+            });
+
+            console.log(`PR #${pull_number} Diff size section updated`);
+
+            if (failReason) {
+              core.setFailed(failReason);
+            }
+
+  # Job 2: Claude Code review
+  review:
+    needs: [summarize]
+    if: always() && github.event.pull_request.draft == false && (needs.summarize.result == 'success' || needs.summarize.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ env.VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: ${{ env.CLOUD_ML_REGION }}
+        with:
+          use_vertex: "true"
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this Flutter mobile app pull request. Focus on:
+            - Logic errors, async/state bugs, and widget lifecycle issues
+            - Security (auth token storage, API input validation)
+            - Riverpod usage (ref.watch vs ref.read, provider placement)
+            - API calls through services/apis/ — not directly from widgets
+            - i18n: user-visible strings in both app_en.arb and app_zh.arb
+            - Shared UI: AppButton, AppInput, AppIconButton (not raw Material widgets in screen/)
+            - Test coverage for behavior changes
+
+            Skip lockfiles, generated l10n, and build artifacts.
+            Follow docs/contributing.md and .cursor/rules when applicable.
+
+            The PR branch is already checked out in the working directory.
+
+            Start the top-level summary with "## 🤖 Claude Code Review".
+            Use `gh pr comment` for the summary.
+            Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) only for real bugs — not style or naming nits.
+            Do not submit a formal APPROVE or REQUEST CHANGES review event.
+          claude_args: |
+            --model ${{ env.VERTEX_MODEL }}
+            --max-turns 25
+            --allowedTools "Read,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment"
