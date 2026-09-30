@@ -29,18 +29,31 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Checkout repository
+        if: github.event.action == 'opened'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
       - name: Authenticate to Google Cloud
         if: github.event.action == 'opened'
-        id: gcp-auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-          token_format: access_token
+
+      - name: Set up gcloud
+        if: github.event.action == 'opened'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get access token
+        if: github.event.action == 'opened'
+        id: gcp-token
+        run: echo "access_token=$(gcloud auth print-access-token)" >> "$GITHUB_OUTPUT"
 
       - name: Auto-fill PR description
         uses: actions/github-script@v7
         env:
-          GCP_ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          GCP_ACCESS_TOKEN: ${{ steps.gcp-token.outputs.access_token }}
           VERTEX_PROJECT_ID: ${{ env.VERTEX_PROJECT_ID }}
           CLOUD_ML_REGION: ${{ env.CLOUD_ML_REGION }}
           VERTEX_MODEL: ${{ env.VERTEX_MODEL }}
