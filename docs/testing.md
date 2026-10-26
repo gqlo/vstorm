@@ -211,7 +211,7 @@ Live-mode tests using a mock `oc` that simulates WaitForFirstConsumer (WFFC) sto
 | Test | Scenario | What it validates |
 |---|---|---|
 | WFFC-1 | WFFC + DataSource + no-snapshot | Skips base DV entirely (direct DataSource clone avoids deadlock) |
-| WFFC-2 | WFFC + URL import + no-snapshot | Skips DV wait, proceeds to VM creation (VMs trigger PVC binding) |
+| WFFC-2 | WFFC + URL import + no-snapshot | Annotates base DV with `cdi.kubevirt.io/storage.bind.immediate.requested` so import can bind without a consumer |
 | WFFC-3 | Immediate binding + URL import | Normal DV wait (no skip), all DVs complete before VMs |
 | WFFC-4 | WFFC + explicit `--snapshot-class` | Snapshot mode auto-disabled with warning, falls back to direct DataSource clone |
 | WFFC-5 | WFFC in dry-run | WFFC warning shown when `oc` is available in dry-run |
@@ -304,7 +304,7 @@ Live-mode tests using a mock `oc` that simulates WFFC storage combined with othe
 | Test | Combination | What it validates |
 |---|---|---|
 | COMBO-43 | WFFC + `--cloudinit=FILE --no-snapshot` | Cloud-init Secret still created under WFFC |
-| COMBO-44 | WFFC + `--dv-url=...` (auto-detected RWO) | WFFC + URL import skips DV wait |
+| COMBO-44 | WFFC + `--dv-url=...` (auto-detected RWO) | WFFC + URL import annotates base DV for immediate bind |
 | COMBO-45 | WFFC + `--vms-per-namespace=3 --namespaces=2` | WFFC at scale |
 | COMBO-46 | WFFC + `--snapshot-class=... --cloudinit=FILE` | WFFC auto-disables snapshot, cloud-init still works |
 

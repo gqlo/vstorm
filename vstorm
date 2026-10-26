@@ -29,6 +29,9 @@ STORAGE_CLASS_SET=0
 ACCESS_MODE_SET=0
 VOLUME_MODE_SET=0
 WAIT_FOR_FIRST_CONSUMER=0
+# Set when WFFC is detected; applied to URL-import base DVs so the import PVC
+# can bind without a consumer Pod (avoids PendingPopulation deadlock).
+DV_ANNOTATIONS=
 UDN_L2=0
 VM_SERVICE=0
 VM_SERVICE_TYPE=nodeport
@@ -763,10 +766,14 @@ detect_access_mode() {
     # Snapshot mode is incompatible with WFFC because the base PVC has
     # no consumer Pod -- it would deadlock.  Auto-disable snapshots and
     # fall back to direct DataSource clone which has no base PVC.
+    # For URL-import base DVs, request CDI immediate bind so the import
+    # can populate without a consumer (clone VMs never mount the base PVC).
     local bind_mode
     bind_mode=$(oc get storageclass "$STORAGE_CLASS" -o jsonpath='{.volumeBindingMode}' 2>/dev/null) || true
     if [[ "$bind_mode" == "WaitForFirstConsumer" ]] ; then
 	WAIT_FOR_FIRST_CONSUMER=1
+	DV_ANNOTATIONS='annotations:
+  cdi.kubevirt.io/storage.bind.immediate.requested: "true"'
 	log_message "Storage class ${C_VAL}'$STORAGE_CLASS'${C_RST} uses WaitForFirstConsumer binding."
 	if ((USE_SNAPSHOT)) ; then
 	    USE_SNAPSHOT=0
@@ -774,8 +781,9 @@ detect_access_mode() {
 	    log_message "  but WFFC storage won't bind until a consumer Pod is scheduled."
 	    log_message "  Falling back to direct DataSource clone (no base PVC needed)."
 	else
-	    log_message "  Will skip waiting for base DataVolume and proceed to VM creation"
-	    log_message "  so that consumer Pods can trigger PVC binding."
+	    log_message "  Will annotate URL-import base DataVolumes for immediate bind"
+	    log_message "  (${C_VAL}cdi.kubevirt.io/storage.bind.immediate.requested${C_RST})"
+	    log_message "  so the import can proceed without a consumer Pod."
 	fi
     fi
 }
@@ -1347,10 +1355,15 @@ create_datavolumes() {
         namespace="${BATCH_ID}-ns-${ns}"
 
         log_message "Creating DataVolume for namespace: ${C_VAL}$namespace${C_RST}"
-        process_template "$dv_file" | oc_apply
+        process_template "$dv_file" |
+	    indent_token DV_ANNOTATIONS "$DV_ANNOTATIONS" |
+	    oc_apply
     done
     if ((wet_run)) ; then
-	if ((WAIT_FOR_FIRST_CONSUMER)) ; then
+	# With bind.immediate on the base DV, wait for import to finish before
+	# creating clone VMs.  Skip only when WFFC was detected but no
+	# annotation was set (should not happen for the URL path).
+	if ((WAIT_FOR_FIRST_CONSUMER)) && [[ -z "$DV_ANNOTATIONS" ]] ; then
 	    log_message "Skipping DataVolume wait (${C_VAL}WaitForFirstConsumer${C_RST}); VMs will trigger PVC binding."
 	else
 	    wait_for_all_datavolumes "$ns_start" "$ns_end"

@@ -154,9 +154,9 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# WFFC-2: WFFC + URL import → skip DV wait, proceed to VM creation
+# WFFC-2: WFFC + URL import → annotate base DV for immediate bind
 # ---------------------------------------------------------------
-@test "wffc: skips DataVolume wait for WaitForFirstConsumer with URL import" {
+@test "wffc: annotates URL-import base DV for immediate bind on WFFC" {
   local mock_dir
   mock_dir=$(mktemp -d)
   _create_mock_oc "$mock_dir"
@@ -174,6 +174,9 @@ setup_file() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"WaitForFirstConsumer"* ]]
+  [[ "$output" == *"annotate URL-import base DataVolumes for immediate bind"* ]]
+  [[ "$output" == *"cdi.kubevirt.io/storage.bind.immediate.requested"* ]]
+  [[ "$output" == *"storage.bind.immediate.requested: \"true\""* ]]
   [[ "$output" == *"Auto-detected access mode 'ReadWriteOnce'"* ]]
   [[ "$output" == *"Creating VirtualMachines"* ]]
 }
@@ -199,6 +202,7 @@ setup_file() {
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"WaitForFirstConsumer"* ]]
+  [[ "$output" != *"storage.bind.immediate.requested"* ]]
   [[ "$output" == *"Creating VirtualMachines"* ]]
 }
 

@@ -18,7 +18,7 @@
 - [How it works](#how-it-works)
 - [Development](#development)
 - **Docs:** [logging](docs/logging.md) | [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) | [cloud-init and fio workload](docs/cloud-init-fio-workload.md) | [workload result sync and dashboard](docs/workload-result-sync-and-dashboard.md)
-- **More docs:** [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md) | [custom build images](custom-build-images/README.md)
+- **More docs:** [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [WFFC base DV deadlock](docs/wffc-base-dv-deadlock.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md) | [custom build images](custom-build-images/README.md)
 - **Helpers:** [vm-ssh](helpers/vm-ssh) | [vm-export](helpers/vm-export) | [install-virtctl](helpers/install-virtctl)
 
 ---
@@ -267,7 +267,7 @@ vstorm auto-detects most storage settings from the cluster. Here are the common 
 |---|---|---|
 | DV stuck in `PendingPopulation` | Access mode mismatch (e.g. RWX on RWO-only storage) | Use `--access-mode=ReadWriteOnce`, or let auto-detection handle it |
 | PVC / DV rejected or stuck on NFS | Storage class only supports Filesystem, but default is Block | Pass `--volume-mode=Filesystem` |
-| PVC stuck `Pending` ("waiting for first consumer") | WaitForFirstConsumer storage with an intermediate base PVC | Handled automatically -- snapshots are disabled and base PVC is skipped |
+| PVC stuck `Pending` ("waiting for first consumer") | WaitForFirstConsumer storage with an intermediate base PVC | Handled automatically -- snapshots disabled; DataSource path skips base PVC; URL-import base DV gets `cdi.kubevirt.io/storage.bind.immediate.requested`. See [docs/wffc-base-dv-deadlock.md](docs/wffc-base-dv-deadlock.md) |
 | `CloneValidationFailed: target size smaller than source` | Default 32Gi is smaller than your golden image | Use `--storage-size=50Gi` (or larger) |
 | VolumeSnapshot never becomes ready | No matching VolumeSnapshotClass for your storage | Pass `--snapshot-class=CLASS`, or omit it to auto-disable snapshots |
 | VMs can't live-migrate | PVCs use ReadWriteOnce (local storage) | Expected -- use shared storage (Ceph/NFS) with RWX for live migration |
