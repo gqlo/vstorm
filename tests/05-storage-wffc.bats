@@ -259,6 +259,35 @@ setup_file() {
   [[ "$output" == *"Access Mode: ReadWriteOnce"* ]]
 }
 
+# ---------------------------------------------------------------
+# WFFC-6: explicit --access-mode still detects WFFC / annotates base DV
+# ---------------------------------------------------------------
+@test "wffc: explicit --access-mode still annotates URL-import base DV on WFFC" {
+  local mock_dir
+  mock_dir=$(mktemp -d)
+  _create_mock_oc "$mock_dir"
+
+  export MOCK_ACCESS_MODE=ReadWriteMany
+  export MOCK_BIND_MODE=WaitForFirstConsumer
+  export PATH="$mock_dir:$PATH"
+
+  run bash "$VSTORM" -n --batch-id=wf0006 --datasource=rhel9 --storage-class=lvms-nvme-sc \
+    --access-mode=ReadWriteOnce --no-snapshot --vms=2 --namespaces=1 \
+    --dv-url=http://example.com/disk.qcow2
+
+  rm -rf "$mock_dir"
+  rm -f logs/wf0006-dryrun.yaml
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Access mode explicitly set to: ReadWriteOnce"* ]]
+  [[ "$output" == *"WaitForFirstConsumer"* ]]
+  [[ "$output" == *"annotate URL-import base DataVolumes for immediate bind"* ]]
+  [[ "$output" == *"cdi.kubevirt.io/storage.bind.immediate.requested"* ]]
+  [[ "$output" == *"storage.bind.immediate.requested: \"true\""* ]]
+  [[ "$output" == *"Creating VirtualMachines"* ]]
+  [[ "$output" != *"Auto-detected"* ]]
+}
+
 # ===============================================================
 # Missing option coverage
 # ===============================================================

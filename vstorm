@@ -727,6 +727,34 @@ check_prerequisites() {
     fi
 }
 
+# Detect WaitForFirstConsumer storage classes.  With WFFC the base
+# DataVolume PVC won't bind until a consumer Pod is scheduled.
+# Snapshot mode is incompatible with WFFC because the base PVC has
+# no consumer Pod -- it would deadlock.  Auto-disable snapshots and
+# fall back to direct DataSource clone which has no base PVC.
+# For URL-import base DVs, request CDI immediate bind so the import
+# can populate without a consumer (clone VMs never mount the base PVC).
+detect_wffc_binding() {
+    local bind_mode
+    bind_mode=$(oc get storageclass "$STORAGE_CLASS" -o jsonpath='{.volumeBindingMode}' 2>/dev/null) || true
+    if [[ "$bind_mode" == "WaitForFirstConsumer" ]] ; then
+	WAIT_FOR_FIRST_CONSUMER=1
+	DV_ANNOTATIONS='annotations:
+  cdi.kubevirt.io/storage.bind.immediate.requested: "true"'
+	log_message "Storage class ${C_VAL}'$STORAGE_CLASS'${C_RST} uses WaitForFirstConsumer binding."
+	if ((USE_SNAPSHOT)) ; then
+	    USE_SNAPSHOT=0
+	    log_message "  ${C_WARN}Warning:${C_RST} Disabling snapshot mode -- snapshots require a bound base PVC,"
+	    log_message "  but WFFC storage won't bind until a consumer Pod is scheduled."
+	    log_message "  Falling back to direct DataSource clone (no base PVC needed)."
+	else
+	    log_message "  Will annotate URL-import base DataVolumes for immediate bind"
+	    log_message "  (${C_VAL}cdi.kubevirt.io/storage.bind.immediate.requested${C_RST})"
+	    log_message "  so the import can proceed without a consumer Pod."
+	fi
+    fi
+}
+
 # Auto-detect the PVC access mode from the CDI StorageProfile.
 # CDI creates a StorageProfile for each StorageClass containing
 # the recommended accessModes and volumeMode.  Prefer the access
@@ -734,9 +762,11 @@ check_prerequisites() {
 # back to the first listed access mode, then to the existing
 # ACCESS_MODE default.
 # Skipped when the user explicitly sets --access-mode.
+# WFFC detection always runs (explicit access mode must not skip it).
 detect_access_mode() {
     if ((ACCESS_MODE_SET)) ; then
 	log_message "Access mode explicitly set to: ${C_VAL}$ACCESS_MODE${C_RST}"
+	detect_wffc_binding
 	return
     fi
 
@@ -761,31 +791,7 @@ detect_access_mode() {
 	log_message "${C_WARN}Warning:${C_RST} Could not detect access mode from StorageProfile for ${C_VAL}'$STORAGE_CLASS'${C_RST}; using default: ${C_VAL}$ACCESS_MODE${C_RST}"
     fi
 
-    # Detect WaitForFirstConsumer storage classes.  With WFFC the base
-    # DataVolume PVC won't bind until a consumer Pod is scheduled.
-    # Snapshot mode is incompatible with WFFC because the base PVC has
-    # no consumer Pod -- it would deadlock.  Auto-disable snapshots and
-    # fall back to direct DataSource clone which has no base PVC.
-    # For URL-import base DVs, request CDI immediate bind so the import
-    # can populate without a consumer (clone VMs never mount the base PVC).
-    local bind_mode
-    bind_mode=$(oc get storageclass "$STORAGE_CLASS" -o jsonpath='{.volumeBindingMode}' 2>/dev/null) || true
-    if [[ "$bind_mode" == "WaitForFirstConsumer" ]] ; then
-	WAIT_FOR_FIRST_CONSUMER=1
-	DV_ANNOTATIONS='annotations:
-  cdi.kubevirt.io/storage.bind.immediate.requested: "true"'
-	log_message "Storage class ${C_VAL}'$STORAGE_CLASS'${C_RST} uses WaitForFirstConsumer binding."
-	if ((USE_SNAPSHOT)) ; then
-	    USE_SNAPSHOT=0
-	    log_message "  ${C_WARN}Warning:${C_RST} Disabling snapshot mode -- snapshots require a bound base PVC,"
-	    log_message "  but WFFC storage won't bind until a consumer Pod is scheduled."
-	    log_message "  Falling back to direct DataSource clone (no base PVC needed)."
-	else
-	    log_message "  Will annotate URL-import base DataVolumes for immediate bind"
-	    log_message "  (${C_VAL}cdi.kubevirt.io/storage.bind.immediate.requested${C_RST})"
-	    log_message "  so the import can proceed without a consumer Pod."
-	fi
-    fi
+    detect_wffc_binding
 }
 
 # Resolve a built-in template path and fatal if the file is missing.
