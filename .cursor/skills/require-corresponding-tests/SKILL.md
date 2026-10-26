@@ -9,13 +9,16 @@ description: >-
 
 # Require Corresponding Tests
 
-When implementing new behavior, **do not finish** until a corresponding test exists and passes.
+**Target: 100% coverage of new and changed behavior.** Every new or behavior-changing
+function (or equivalent) must ship with a corresponding test in the same change.
+When implementing new behavior, **do not finish** until those tests exist and pass.
 
 ## Workflow
 
 1. Identify each new/changed **function** (or method / exported helper / significant bash function).
-2. Add or update the matching test in the table below **in the same change**.
+2. Add or update the matching test in the table below **in the same change** — no untested gaps.
 3. Run the relevant suite and fix failures (prefer fixing code over weakening tests).
+4. Before merge: confirm every new/changed function has at least one covering test (100% of the delta).
 
 ## Where tests live
 
@@ -40,6 +43,6 @@ When implementing new behavior, **do not finish** until a corresponding test exi
 
 ## Done checklist
 
-- [ ] Every new/changed function has a test
+- [ ] 100% of new/changed functions have corresponding tests (no intentional gaps)
 - [ ] Relevant suite(s) run clean locally
 - [ ] CI jobs that cover that language are expected to pass (`test`, `test-python`, `test-js`)

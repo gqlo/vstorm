@@ -5,7 +5,10 @@ alwaysApply: true
 
 # Corresponding Tests Required
 
-When adding or significantly changing a **function** (or equivalent: method, exported helper, CLI subcommand handler), also add or update a **corresponding test** in the same change.
+**100% coverage of the change delta:** when adding or significantly changing a **function**
+(or equivalent: method, exported helper, CLI subcommand handler), also add or update a
+**corresponding test** in the same change. Do not leave new/changed functions untested.
+Follow skill `.cursor/skills/require-corresponding-tests`.
 
 ## Applies to
 
