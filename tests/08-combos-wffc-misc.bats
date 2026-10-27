@@ -65,6 +65,7 @@ setup_file() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"WaitForFirstConsumer"* ]]
+  [[ "$output" == *"storage.bind.immediate.requested: \"true\""* ]]
   [[ "$output" == *"Auto-detected access mode 'ReadWriteOnce'"* ]]
 }
 

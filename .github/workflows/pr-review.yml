@@ -79,9 +79,10 @@ jobs:
                prBody.split('## Description')[1]?.split('##')[0]?.replace(/<!--[\s\S]*?-->/g, '').trim().length > 0);
 
             const SKIP_PATTERNS = [
-              /pubspec\.lock$/, /\.lock$/,
-              /app_localizations(_(en|zh))?\.dart$/,
-              /\.g\.dart$/, /\.freezed\.dart$/, /\.min\.(js|css)$/
+              /(^|\/)logs(\/|$)/,
+              /\.lock$/,
+              /\.min\.(js|css)$/,
+              /\.(png|jpg|jpeg|gif|webp|ico|qcow2|img)$/
             ];
             const MAX_DIFF_SIZE = 12000;
 
@@ -96,14 +97,16 @@ jobs:
               const f = filename.replace(/\\/g, '/');
               if (/(^|\/)(\.cursor|\.github)(\/|$)/.test(f)) return 'other';
               if (
-                /(^|\/)(test|tests|__tests__|e2e)(\/|$)/.test(f) ||
-                /_test\.dart$/.test(f) ||
-                /\.(test|spec)\.(ts|tsx|js|jsx|go)$/.test(f)
+                /(^|\/)(test|tests|__tests__)(\/|$)/.test(f) ||
+                /\.bats$/.test(f) ||
+                /test_.*\.(py|js)$/.test(f) ||
+                /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f)
               ) return 'test';
               if (/(^|\/)docs(\/|$)/.test(f) || /\.(md|mdx)$/.test(f)) return 'docs';
               if (
-                /(^|\/)(lib|src|api|app|cmd)(\/|$)/.test(f) ||
-                /\.(dart|go|ts|tsx|js|jsx|py)$/.test(f)
+                f === 'vstorm' ||
+                /(^|\/)(helpers|templates|workload|tab-completion|monitoring|hooks)(\/|$)/.test(f) ||
+                /\.(sh|bash|py|js|yaml|yml)$/.test(f)
               ) return 'code';
               return 'other';
             };
@@ -205,11 +208,11 @@ jobs:
                   'Brief bullet summary of files or areas changed.',
                   '',
                   '## How Has This Been Tested?',
-                  'Mark applicable with [x]: Unit tests, Manual testing, N/A',
+                  'Mark applicable with [x]: bats tests, monitoring unit tests, Manual dry-run (-n), Live cluster, N/A',
                   '(Use format: - [x] Item)',
                   '',
                   '## Checklist',
-                  'Mark applicable with [x]: code style, self-review, tests added, tests pass, docs updated, i18n (en + zh ARB)',
+                  'Mark applicable with [x]: shell safety (quoting/set -u), self-review, 100% corresponding tests for new/changed functions (bats/python/js), CI green, docs/README updated if flags or behavior changed',
                   '(Use format: - [x] Item)'
                 ].join('\n');
 
@@ -331,25 +334,44 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Review this Flutter mobile app pull request. Focus on:
-            - Logic errors, async/state bugs, and widget lifecycle issues
-            - Security (auth token storage, API input validation)
-            - Riverpod usage (ref.watch vs ref.read, provider placement)
-            - API calls through services/apis/ — not directly from widgets
-            - i18n: user-visible strings in both app_en.arb and app_zh.arb
-            - Shared UI: AppButton, AppInput, AppIconButton (not raw Material widgets in screen/)
-            - Test coverage for behavior changes
+            Review this vstorm pull request. vstorm is a Bash CLI for batch VM creation
+            on OpenShift Virtualization (no Flutter/mobile app). Focus on:
+            - Bash correctness: quoting, set -euo pipefail, unset vars, pipefail mid-pipe failures
+            - CLI flag / env parsing and defaults; dry-run (-n/-q) vs live apply paths
+            - YAML template placeholders in templates/ and sed substitution in vstorm
+            - OpenShift / KubeVirt semantics (DV, VolumeSnapshot, VM, DataSource, WFFC, storage)
+            - helpers/, workload/, tab-completion, and monitoring/ (Python + dashboard JS) changes
+            - Test coverage (mandatory): 100% of new/changed functions must have corresponding
+              tests — bats in tests/, monitoring/tests (unittest / node --test). Flag any
+              untested new/changed function as a real bug. Follow skill
+              .cursor/skills/require-corresponding-tests and rule require-corresponding-tests.
+            - Docs/README updates when flags or user-facing behavior change
 
-            Skip lockfiles, generated l10n, and build artifacts.
-            Follow docs/contributing.md and .cursor/rules when applicable.
+            Skip logs/, binary images, and unrelated generated artifacts.
+            Follow .cursor/rules (bash-standards, shell-safety, bats-testing,
+            require-corresponding-tests, yaml-templates) and
+            .cursor/skills/require-corresponding-tests when applicable.
 
             The PR branch is already checked out in the working directory.
 
-            Start the top-level summary with "## 🤖 Claude Code Review".
-            Use `gh pr comment` for the summary.
-            Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) only for real bugs — not style or naming nits.
+            Always report findings — do not stop at inline comments alone.
+            Start the top-level summary with "## 🤖 Claude Code Review" and post it
+            with `gh pr comment`. The summary MUST include:
+            - Brief overall assessment
+            - **Bugs** — incorrect behavior, crashes, data loss, broken CLI/YAML output
+            - **Logic flaws** — wrong control flow, race/ordering, incorrect defaults,
+              dry-run vs live divergence, template/placeholder mistakes
+            - **Issues** — missing 100% corresponding tests, security/shell-safety gaps,
+              docs drift, incomplete error handling
+            For each item: severity (blocker / major / minor), file path, short why it
+            matters, and a concrete fix hint. If none found in a category, write "None".
+
+            Additionally use `mcp__github_inline_comment__create_inline_comment`
+            (with `confirmed: true`) on the specific lines for real bugs and logic flaws —
+            not style or naming nits. Inline comments complement the summary; every
+            finding still belongs in the summary list.
             Do not submit a formal APPROVE or REQUEST CHANGES review event.
           claude_args: |
             --model ${{ env.VERTEX_MODEL }}
-            --max-turns 25
+            --max-turns 35
             --allowedTools "Read,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment"

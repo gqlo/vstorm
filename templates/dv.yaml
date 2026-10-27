@@ -6,6 +6,7 @@ metadata:
   labels:
     batch-id: "{BATCH_ID}"
     vm-basename: "{VM_BASENAME}"
+  {DV_ANNOTATIONS}
 spec:
   source:
     http:
