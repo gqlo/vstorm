@@ -55,8 +55,10 @@ VM_CPU_CORES="1"
 VM_MEMORY="1Gi"
 # Guest firmware: efi (OVMF + SMM; secureBoot false by default) or bios (legacy)
 VM_FIRMWARE="efi"
-# YAML templates live in templates/ next to this script.
-BUILTIN_TEMPLATES_DIR="$(cd "$(dirname "$0")" && pwd)/templates"
+# YAML templates live in templates/ next to this script. Resolve relative to
+# BASH_SOURCE (the vstorm file), not $0, so bundled templates are found even when
+# the script is sourced (e.g. by unit tests) rather than executed directly.
+BUILTIN_TEMPLATES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/templates"
 VM_CPU_REQUEST=
 VM_MEMORY_REQUEST=
 CLOUDINIT_FILE=
@@ -521,7 +523,10 @@ process_option() {
 	    ;;
 	wait)	   parse_bool_flag WAIT "$value" "--wait" ;;
 	waitssh)   parse_bool_flag WAIT_SSH "$value" "--wait-ssh"
-		   ((WAIT_SSH)) && WAIT=1 ;;
+		   # Use an `if` (not `(( )) &&`): a false WAIT_SSH must not leave a
+		   # nonzero status as the branch's result, which `set -e` would treat
+		   # as a parse failure and abort the run.
+		   if ((WAIT_SSH)); then WAIT=1; fi ;;
 	env)
 	    # Keep full KEY=VAL (including KEY= and KEY=a=b). Do not use $value from
 	    # IFS== read — a trailing '=' is dropped (RESULT_SERVER_URL= → RESULT_SERVER_URL).
@@ -929,7 +934,7 @@ apply_default_cloudinit_if_needed() {
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
 	return 0
     fi
-    CLOUDINIT_FILE="$(dirname "$0")/workload/cloudinit-default.yaml"
+    CLOUDINIT_FILE="$(dirname "${BASH_SOURCE[0]}")/workload/cloudinit-default.yaml"
     if [[ ! -f "$CLOUDINIT_FILE" ]] ; then
 	fatal "Default cloud-init file not found: $CLOUDINIT_FILE"
     fi
@@ -1543,7 +1548,7 @@ collect_batch_dv_created_json() {
 	printf '%s\n' '{}' > "$vs_file"
     fi
     local collector
-    collector="$(cd "$(dirname "$0")" && pwd)/monitoring/data-collector/collect_batch_dv_created.py"
+    collector="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/monitoring/data-collector/collect_batch_dv_created.py"
     out_json=$(
 	BASENAME="$VM_BASENAME" BATCH_ID="$BATCH_ID" \
 	VM_JSON_FILE="$vm_file" NS_JSON_FILE="$ns_file" \

@@ -120,8 +120,14 @@ Applies to `templates/*.yaml`.
 - **Unit tests**: `tests/90-unit-pure-functions.bats` `source`s `vstorm` and
   calls functions directly (no subprocess, no mock `oc`) — the fast layer for
   pure/validation/detection helpers (`join_name`, `validate_subnet`,
-  `parse_bool_flag`, `_apply_simple_option`, `detect_access_mode`, …). Use `run`
-  for functions that may call `fatal`; call directly to inspect mutated globals.
+  `parse_bool_flag`, `_apply_simple_option`, `detect_access_mode`,
+  `parse_cli_args`, …). Use `run` for functions that may call `fatal`; call
+  directly to inspect mutated globals. This suite is **exempt from the PREFIX
+  naming/header convention above**: tests are grouped by function under `# ---`
+  banners and the title names the function under test (there is no CLI command to
+  categorize). Orchestration functions that require a live cluster (`run_cli`,
+  `run_dispatch`, `run_creation_flow`, `write_batch_manifest`) are covered by the
+  end-to-end suite rather than unit tests.
 
 ### Corresponding tests required
 

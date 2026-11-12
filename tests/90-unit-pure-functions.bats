@@ -169,6 +169,28 @@ setup() {
 }
 
 # ---------------------------------------------------------------
+# parse_cli_args (argv parsing; no cluster I/O)
+# ---------------------------------------------------------------
+@test "parse_cli_args handles --wait-ssh=false without aborting (set -e regression)" {
+    parse_cli_args --wait-ssh=false --vms=1 --namespaces=1
+    [ "$WAIT_SSH" -eq 0 ]
+    [ "$WAIT" -eq 0 ]
+}
+
+@test "parse_cli_args --wait-ssh=true implies --wait" {
+    parse_cli_args --wait-ssh=true --vms=1 --namespaces=1
+    [ "$WAIT_SSH" -eq 1 ]
+    [ "$WAIT" -eq 1 ]
+}
+
+@test "parse_cli_args sets VM/namespace counts and flags" {
+    parse_cli_args --vms=4 --namespaces=2 --cores=3
+    [ "$NUM_VMS" -eq 4 ]
+    [ "$NUM_NAMESPACES" -eq 2 ]
+    [ "$VM_CPU_CORES" = "3" ]
+}
+
+# ---------------------------------------------------------------
 # _json_fields_to_shell
 # ---------------------------------------------------------------
 @test "_json_fields_to_shell emits scalar, fallback, and joined fields" {
