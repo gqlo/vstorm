@@ -10,9 +10,13 @@ set -eu
 # Close inherited file descriptors above stderr.
 # Prevents subshell deadlocks when invoked from environments (e.g. git hooks,
 # CI runners) that leave extra fds open for lock files or IPC.
-for _fd in 3 4 5 6 7 8 9; do
-    eval "exec $_fd>&-" 2>/dev/null || true
-done
+# Skipped when the script is sourced (e.g. by unit tests) so we don't close
+# file descriptors the sourcing process relies on (bats uses fd 3).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    for _fd in 3 4 5 6 7 8 9; do
+	eval "exec $_fd>&-" 2>/dev/null || true
+    done
+fi
 
 # Configuration variables - modify these as needed
 DATASOURCE=
@@ -412,6 +416,20 @@ EOF
     exit 0
 }
 
+# Set a boolean variable (passed by name) from a flag value.
+# An empty value (bare flag, e.g. --wait) means true. Accepts the synonyms
+# 1/true/yes/on and 0/false/no/off (case-insensitive); fatals otherwise.
+# Usage: parse_bool_flag VARNAME "$value" "--flag-name"
+parse_bool_flag() {
+    local -n _ref=$1
+    local value=${2:-} flag=$3
+    case "${value,,}" in
+	''|1|true|yes|on) _ref=1 ;;
+	0|false|no|off)   _ref=0 ;;
+	*) fatal "Invalid $flag value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
+    esac
+}
+
 # Process long options.  Handle options names case-insensitive
 # and allow either -, _, or neither in names.
 process_option() {
@@ -453,14 +471,7 @@ process_option() {
 	vmsper*)   NUM_VMS_PER_NAMESPACE=$value ;;
 	vms*)	   NUM_VMS=$value ;;
 	namesp*)   NUM_NAMESPACES=$value ;;
-	nssequentialcreation) case "${value,,}" in
-		       '') NS_SEQUENTIAL_CREATION=1 ;;  # --ns-sequential-creation with no value
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) NS_SEQUENTIAL_CREATION=0 ;;
-		           *) NS_SEQUENTIAL_CREATION=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --ns-sequential-creation value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
+	nssequentialcreation) parse_bool_flag NS_SEQUENTIAL_CREATION "$value" "--ns-sequential-creation" ;;
 	udnl2)
 	    UDN_L2=1
 	    if [[ -n "$value" ]]; then
@@ -472,22 +483,9 @@ process_option() {
 	    parse_service_value "$value"
 	    ;;
 	runstrat*) RUN_STRATEGY=$value ;;
-	wait)	   case "${value,,}" in
-		       '') WAIT=1 ;;  # --wait with no value
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) WAIT=0 ;;
-		           *) WAIT=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --wait value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
-	waitssh)   case "${value,,}" in
-		       '') WAIT_SSH=1; WAIT=1 ;;
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) WAIT_SSH=0 ;;
-		           *) WAIT_SSH=1; WAIT=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --wait-ssh value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
+	wait)	   parse_bool_flag WAIT "$value" "--wait" ;;
+	waitssh)   parse_bool_flag WAIT_SSH "$value" "--wait-ssh"
+		   ((WAIT_SSH)) && WAIT=1 ;;
 	cloudinit) CLOUDINIT_FILE=$value ;;
 	env)
 	    # Keep full KEY=VAL (including KEY= and KEY=a=b). Do not use $value from
@@ -506,40 +504,48 @@ process_option() {
     esac
 }
 
-# Normalize --env VAL to --env=VAL so getopts receives a value (space-separated form)
-_argv=()
-for ((_i=1; _i<=$#; _i++)); do
-    _arg="${@:_i:1}"
-    if [[ "$_arg" == --env && _i -lt $# ]]; then
-	_next="${@:_i+1:1}"
-	if [[ "$_next" != --* ]]; then
-	    _argv+=("--env=$_next")
-	    ((_i++))
-	    continue
+# Parse command-line arguments: normalize argv, run getopts, then derive
+# defaults and validate. Wrapped in a function (rather than run at file scope)
+# so the script can be sourced for unit testing without parsing argv or
+# touching the cluster. See run_cli / the source guard at the end of the file.
+parse_cli_args() {
+    local -a _argv=()
+    local _i _arg _next
+    local OPTIND=1 opt
+    # Normalize --env VAL to --env=VAL so getopts receives a value (space-separated form)
+    for ((_i=1; _i<=$#; _i++)); do
+	_arg="${@:_i:1}"
+	if [[ "$_arg" == --env && _i -lt $# ]]; then
+	    _next="${@:_i+1:1}"
+	    if [[ "$_next" != --* ]]; then
+		_argv+=("--env=$_next")
+		((_i++))
+		continue
+	    fi
 	fi
-    fi
-    _argv+=("$_arg")
-done
-set -- "${_argv[@]}"
+	_argv+=("$_arg")
+    done
+    set -- "${_argv[@]}"
 
-# process all the options one by one, - is treated as the option"-"
-# Leading : suppresses getopts default error so we can show our own message.
-while getopts ':nqyh-:' opt "$@" ; do
-    case "$opt" in
-	n) wet_run=0	    ;;
-	q) quiet=1; wet_run=0	    ;;
-	y) CONFIRM_DELETE=1	    ;;
-	h) help			    ;;
-	-) process_option "$OPTARG" ;;
-	*) fatal "Error: unrecognized option '-${OPTARG:-$opt}'. Run '$0 -h' to see all options." ;;
-    esac
-done
+    # process all the options one by one, - is treated as the option"-"
+    # Leading : suppresses getopts default error so we can show our own message.
+    while getopts ':nqyh-:' opt "$@" ; do
+	case "$opt" in
+	    n) wet_run=0	    ;;
+	    q) quiet=1; wet_run=0	    ;;
+	    y) CONFIRM_DELETE=1	    ;;
+	    h) help			    ;;
+	    -) process_option "$OPTARG" ;;
+	    *) fatal "Error: unrecognized option '-${OPTARG:-$opt}'. Run '$0 -h' to see all options." ;;
+	esac
+    done
 
-# clean all the optional arguments that have been processed by getopts so that the positional arguments are now the remaining arguments
-shift $((OPTIND-1))
+    # clean all the optional arguments that have been processed by getopts so that the positional arguments are now the remaining arguments
+    shift $((OPTIND-1))
 
-derive_defaults
-validate_args "$@"
+    derive_defaults
+    validate_args "$@"
+}
 
 # Function to log with timestamp
 # Output may be provided on command line; if not, it is
@@ -1879,22 +1885,12 @@ wait_for_all_vms() {
     done
 }
 
-create_virtualmachines() {
-    local -i ns_start="${1:-1}" ns_end="${2:-$NUM_NAMESPACES}" force_wait="${3:-0}"
-    # NOTE: ns is deliberately "local -i" (only ever holds a namespace index),
-    # but vm must stay a plain (non-integer) local: wait_for_all_vms(), called
-    # from below, reuses this same variable name via bash's dynamic scoping
-    # (it has no "local vm" of its own) and assigns it "namespace/vm-name"
-    # strings. If vm had the -i attribute, that string assignment would be
-    # evaluated as arithmetic and blow up under `set -u` on the first
-    # non-numeric token (e.g. "vstorm: unbound variable").
-    local -i ns
-    local vm
-    log_message "${C_BOLD}Creating VirtualMachines...${C_RST}"
-    # One-time template setup (cloud-init, data disk, existing VM lookup, ...).
-    # Guarded so repeated calls -- one per --ns-sequential-creation namespace -- reuse it
-    # instead of recomputing/re-listing (e.g. `oc get vm -A`) every time.
-    if ((! VM_TEMPLATES_READY)) ; then
+# One-time per-run VM template setup: cloud-init Secret payload, resource
+# requests, firmware block, blank data-disk DataVolume template, and the
+# existing-VM lookup. Sets module-level (global) variables consumed by the
+# create loop in create_virtualmachines; guarded there by VM_TEMPLATES_READY
+# so it runs once even across --ns-sequential-creation groups.
+prepare_vm_templates() {
     VM_ID=1
 	if ((UDN_L2)); then
 		vm_file="${TEMPLATE_CACHE[vm-udn]}"
@@ -2054,7 +2050,26 @@ ${data_dv_template}"
 	    if [[ -n "$vm" ]] ; then existing_vms["$vm"]=1; fi
 	done <<< "$(oc get vm -A --no-headers | awk '{printf "%s/%s\n", $1, $2}')"
     fi
-    VM_TEMPLATES_READY=1
+}
+
+create_virtualmachines() {
+    local -i ns_start="${1:-1}" ns_end="${2:-$NUM_NAMESPACES}" force_wait="${3:-0}"
+    # NOTE: ns is deliberately "local -i" (only ever holds a namespace index),
+    # but vm must stay a plain (non-integer) local: wait_for_all_vms(), called
+    # from below, reuses this same variable name via bash's dynamic scoping
+    # (it has no "local vm" of its own) and assigns it "namespace/vm-name"
+    # strings. If vm had the -i attribute, that string assignment would be
+    # evaluated as arithmetic and blow up under `set -u` on the first
+    # non-numeric token (e.g. "vstorm: unbound variable").
+    local -i ns
+    local vm
+    log_message "${C_BOLD}Creating VirtualMachines...${C_RST}"
+    # One-time template setup (cloud-init, data disk, existing VM lookup, ...).
+    # Guarded so repeated calls -- one per --ns-sequential-creation namespace -- reuse it
+    # instead of recomputing/re-listing (e.g. `oc get vm -A`) every time.
+    if ((! VM_TEMPLATES_READY)) ; then
+	prepare_vm_templates
+	VM_TEMPLATES_READY=1
     fi
     for ((ns=ns_start; ns<=ns_end; ns++)); do
         namespace="${BATCH_ID}-ns-${ns}"
@@ -3162,127 +3177,12 @@ profiler_prompt_and_stop() {
 
 ################################################################
 # Main execution
-main() {
-    prepare_creation
-    log_message "${C_BOLD}Starting resource creation process...${C_RST}"
-    log_message "Batch ID:      ${C_VAL}$BATCH_ID${C_RST}"
-    log_message "Configuration: ${C_VAL}$NUM_VMS${C_RST} VMs across ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces"
-
-    if [[ -n "$CONTAINERDISK_IMAGE" ]] ; then
-	log_message "ContainerDisk: ${C_VAL}$CONTAINERDISK_IMAGE${C_RST}"
-    elif [[ -n "$DATASOURCE" ]] ; then
-	log_message "DataSource:    ${C_VAL}$DATASOURCE${C_RST} (from ${C_VAL}$DATASOURCE_NS${C_RST})"
-    else
-	log_message "DV URL:        ${C_VAL}$DV_URL${C_RST}"
-	log_message "Storage size:  ${C_VAL}$STORAGE_SIZE${C_RST}"
-    fi
-    if [[ -n "$DATA_DISK_SIZE" ]] ; then
-	log_message "Data disk:     ${C_VAL}$DATA_DISK_SIZE${C_RST} (blank vdb)"
-    fi
-    if [[ -z "$CONTAINERDISK_IMAGE" || -n "$DATA_DISK_SIZE" ]] ; then
-	log_message "Storage class: ${C_VAL}$STORAGE_CLASS${C_RST}"
-	log_message "Volume mode:   ${C_VAL}$VOLUME_MODE${C_RST}"
-	if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
-	    if ((USE_SNAPSHOT)) ; then
-		log_message "Snapshot mode: enabled (class: ${C_VAL}$SNAPSHOT_CLASS${C_RST})"
-	    elif [[ -n "$DATASOURCE" ]] ; then
-		log_message "Snapshot mode: disabled (direct DataSource clone)"
-	    else
-		log_message "Snapshot mode: disabled (direct PVC clone)"
-	    fi
-	fi
-    fi
-    log_message "VM CPU cores:  ${C_VAL}$VM_CPU_CORES${C_RST}"
-    log_message "VM memory:     ${C_VAL}$VM_MEMORY${C_RST}"
-    log_message "VM firmware:   ${C_VAL}$VM_FIRMWARE${C_RST}"
-    log_message "Cloud-init:    ${C_VAL}${CLOUDINIT_FILE:-none}${C_RST}"
-    log_message "Run strategy:  ${C_VAL}$RUN_STRATEGY${C_RST}"
-    if ((WAIT_SSH)); then
-	log_message "Wait SSH:      ${C_VAL}yes (${SSH_READY_TIMEOUT}s)${C_RST}"
-    elif ((WAIT)); then
-	log_message "Wait VMs:      ${C_VAL}yes${C_RST}"
-    fi
-    if ((NS_SEQUENTIAL_CREATION)); then
-	log_message "NS sequential: ${C_VAL}true${C_RST} (--ns-sequential-creation: one namespace at a time)"
-    fi
-
-    if ((NS_SEQUENTIAL_CREATION)) ; then
-	log_message "${C_BOLD}ns-sequential-creation enabled:${C_RST} creating/waiting one namespace at a time"
-	local -i seq_ns is_last_ns
-	for ((seq_ns=1; seq_ns<=NUM_NAMESPACES; seq_ns++)); do
-	    is_last_ns=$((seq_ns == NUM_NAMESPACES ? 1 : 0))
-	    log_message "${C_BOLD}Namespace ${C_VAL}${seq_ns}${C_RST}${C_BOLD} of ${C_VAL}${NUM_NAMESPACES}${C_RST}"
-	    create_namespaces "$seq_ns" "$seq_ns"
-	    if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
-		create_datavolumes "$seq_ns" "$seq_ns"
-		if ((USE_SNAPSHOT)) ; then
-		    create_volumesnapshots "$seq_ns" "$seq_ns"
-		elif ((seq_ns == 1)) ; then
-		    log_message "Skipping VolumeSnapshots (${C_VAL}--no-snapshot${C_RST} mode)"
-		fi
-	    fi
-	    # Force a wait for this namespace's VMs to reach Running before
-	    # moving on -- otherwise --ns-sequential-creation would just reorder the
-	    # same burst of creates with no throttling effect. The final
-	    # namespace still honors --wait for whether create returns
-	    # only once everything is Running.
-	    create_virtualmachines "$seq_ns" "$seq_ns" $((is_last_ns ? 0 : 1))
-	    if ((VM_SERVICE)); then
-		create_vm_service "$seq_ns" "$seq_ns"
-	    fi
-	    # Post an incremental progress manifest as soon as this namespace's
-	    # resources are created, so the dashboard/result server reflects
-	    # progress namespace-by-namespace instead of only once after the
-	    # whole --ns-sequential-creation loop finishes.
-	    if ((wet_run)) && _result_server_url_configured; then
-		BATCH_DV_CREATED_JSON=$(collect_batch_dv_created_json)
-		post_batch_result_metadata progress
-	    fi
-	done
-    else
-	create_namespaces
-	if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
-	    create_datavolumes
-	    if ((USE_SNAPSHOT)) ; then
-		create_volumesnapshots
-	    else
-		log_message "Skipping VolumeSnapshots (${C_VAL}--no-snapshot${C_RST} mode)"
-	    fi
-	fi
-	create_virtualmachines
-	if ((VM_SERVICE)); then
-	    create_vm_service
-	fi
-    fi
-
-    # TODO: re-enable once verify_cloudinit is improved
-    # if ((wet_run && WAIT)) && [[ -n "$CLOUDINIT_FILE" ]]; then
-    #     verify_cloudinit
-    # fi
-
-    local ssh_verify_failed=0
-    if ((wet_run && WAIT_SSH)); then
-	if ! verify_ssh_port; then
-	    ssh_verify_failed=1
-	fi
-    fi
-
-    if ((wet_run)) ; then
-	if ((ssh_verify_failed)); then
-	    log_message "${C_WARN}Resource creation finished but SSH port check failed${C_RST}"
-	else
-	    log_message "${C_OK}Resource creation completed successfully!${C_RST}"
-	fi
-	if [[ -n "$CONTAINERDISK_IMAGE" ]] ; then
-	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (container disk)"
-	elif ((USE_SNAPSHOT)) ; then
-	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces, ${C_VAL}$NUM_NAMESPACES${C_RST} DataVolumes, ${C_VAL}$NUM_NAMESPACES${C_RST} VolumeSnapshots, and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines"
-	elif [[ -n "$DATASOURCE" ]] ; then
-	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (direct DataSource clone, no base DVs)"
-	else
-	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces, ${C_VAL}$NUM_NAMESPACES${C_RST} DataVolumes, and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (no snapshots)"
-	fi
-
+# Log the run configuration banner (batch id, source, storage, VM spec, wait
+# mode). Pure logging from globals; no side effects on the cluster.
+# Write the batch manifest file, per-batch DV/SSH JSON sidecars, and POST the
+# final result metadata. Extracted from main for readability/testability.
+write_batch_manifest() {
+	local ns key
 	# Write batch manifest file
 	local manifest_file="${LOG_DIR}/batch-${BATCH_ID}.manifest"
 	local ns_list=""
@@ -3391,6 +3291,139 @@ print("ssh_failed_line=%s" % shlex.quote(",".join(d.get("vm_ssh_failed") or []))
 	log_message "Batch manifest written to: ${C_VAL}$manifest_file${C_RST}"
 
 	post_batch_result_metadata final
+}
+
+log_run_config() {
+    log_message "${C_BOLD}Starting resource creation process...${C_RST}"
+    log_message "Batch ID:      ${C_VAL}$BATCH_ID${C_RST}"
+    log_message "Configuration: ${C_VAL}$NUM_VMS${C_RST} VMs across ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces"
+
+    if [[ -n "$CONTAINERDISK_IMAGE" ]] ; then
+	log_message "ContainerDisk: ${C_VAL}$CONTAINERDISK_IMAGE${C_RST}"
+    elif [[ -n "$DATASOURCE" ]] ; then
+	log_message "DataSource:    ${C_VAL}$DATASOURCE${C_RST} (from ${C_VAL}$DATASOURCE_NS${C_RST})"
+    else
+	log_message "DV URL:        ${C_VAL}$DV_URL${C_RST}"
+	log_message "Storage size:  ${C_VAL}$STORAGE_SIZE${C_RST}"
+    fi
+    if [[ -n "$DATA_DISK_SIZE" ]] ; then
+	log_message "Data disk:     ${C_VAL}$DATA_DISK_SIZE${C_RST} (blank vdb)"
+    fi
+    if [[ -z "$CONTAINERDISK_IMAGE" || -n "$DATA_DISK_SIZE" ]] ; then
+	log_message "Storage class: ${C_VAL}$STORAGE_CLASS${C_RST}"
+	log_message "Volume mode:   ${C_VAL}$VOLUME_MODE${C_RST}"
+	if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
+	    if ((USE_SNAPSHOT)) ; then
+		log_message "Snapshot mode: enabled (class: ${C_VAL}$SNAPSHOT_CLASS${C_RST})"
+	    elif [[ -n "$DATASOURCE" ]] ; then
+		log_message "Snapshot mode: disabled (direct DataSource clone)"
+	    else
+		log_message "Snapshot mode: disabled (direct PVC clone)"
+	    fi
+	fi
+    fi
+    log_message "VM CPU cores:  ${C_VAL}$VM_CPU_CORES${C_RST}"
+    log_message "VM memory:     ${C_VAL}$VM_MEMORY${C_RST}"
+    log_message "VM firmware:   ${C_VAL}$VM_FIRMWARE${C_RST}"
+    log_message "Cloud-init:    ${C_VAL}${CLOUDINIT_FILE:-none}${C_RST}"
+    log_message "Run strategy:  ${C_VAL}$RUN_STRATEGY${C_RST}"
+    if ((WAIT_SSH)); then
+	log_message "Wait SSH:      ${C_VAL}yes (${SSH_READY_TIMEOUT}s)${C_RST}"
+    elif ((WAIT)); then
+	log_message "Wait VMs:      ${C_VAL}yes${C_RST}"
+    fi
+    if ((NS_SEQUENTIAL_CREATION)); then
+	log_message "NS sequential: ${C_VAL}true${C_RST} (--ns-sequential-creation: one namespace at a time)"
+    fi
+}
+
+# Create namespaces, DataVolumes, snapshots, VMs and services, either all at
+# once (default) or one namespace fully at a time (--ns-sequential-creation).
+run_creation_flow() {
+    if ((NS_SEQUENTIAL_CREATION)) ; then
+	log_message "${C_BOLD}ns-sequential-creation enabled:${C_RST} creating/waiting one namespace at a time"
+	local -i seq_ns is_last_ns
+	for ((seq_ns=1; seq_ns<=NUM_NAMESPACES; seq_ns++)); do
+	    is_last_ns=$((seq_ns == NUM_NAMESPACES ? 1 : 0))
+	    log_message "${C_BOLD}Namespace ${C_VAL}${seq_ns}${C_RST}${C_BOLD} of ${C_VAL}${NUM_NAMESPACES}${C_RST}"
+	    create_namespaces "$seq_ns" "$seq_ns"
+	    if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
+		create_datavolumes "$seq_ns" "$seq_ns"
+		if ((USE_SNAPSHOT)) ; then
+		    create_volumesnapshots "$seq_ns" "$seq_ns"
+		elif ((seq_ns == 1)) ; then
+		    log_message "Skipping VolumeSnapshots (${C_VAL}--no-snapshot${C_RST} mode)"
+		fi
+	    fi
+	    # Force a wait for this namespace's VMs to reach Running before
+	    # moving on -- otherwise --ns-sequential-creation would just reorder the
+	    # same burst of creates with no throttling effect. The final
+	    # namespace still honors --wait for whether create returns
+	    # only once everything is Running.
+	    create_virtualmachines "$seq_ns" "$seq_ns" $((is_last_ns ? 0 : 1))
+	    if ((VM_SERVICE)); then
+		create_vm_service "$seq_ns" "$seq_ns"
+	    fi
+	    # Post an incremental progress manifest as soon as this namespace's
+	    # resources are created, so the dashboard/result server reflects
+	    # progress namespace-by-namespace instead of only once after the
+	    # whole --ns-sequential-creation loop finishes.
+	    if ((wet_run)) && _result_server_url_configured; then
+		BATCH_DV_CREATED_JSON=$(collect_batch_dv_created_json)
+		post_batch_result_metadata progress
+	    fi
+	done
+    else
+	create_namespaces
+	if [[ -z "$CONTAINERDISK_IMAGE" ]] ; then
+	    create_datavolumes
+	    if ((USE_SNAPSHOT)) ; then
+		create_volumesnapshots
+	    else
+		log_message "Skipping VolumeSnapshots (${C_VAL}--no-snapshot${C_RST} mode)"
+	    fi
+	fi
+	create_virtualmachines
+	if ((VM_SERVICE)); then
+	    create_vm_service
+	fi
+    fi
+}
+
+main() {
+    prepare_creation
+    log_run_config
+    run_creation_flow
+
+    # TODO: re-enable once verify_cloudinit is improved
+    # if ((wet_run && WAIT)) && [[ -n "$CLOUDINIT_FILE" ]]; then
+    #     verify_cloudinit
+    # fi
+
+    local ssh_verify_failed=0
+    if ((wet_run && WAIT_SSH)); then
+	if ! verify_ssh_port; then
+	    ssh_verify_failed=1
+	fi
+    fi
+
+    if ((wet_run)) ; then
+	if ((ssh_verify_failed)); then
+	    log_message "${C_WARN}Resource creation finished but SSH port check failed${C_RST}"
+	else
+	    log_message "${C_OK}Resource creation completed successfully!${C_RST}"
+	fi
+	if [[ -n "$CONTAINERDISK_IMAGE" ]] ; then
+	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (container disk)"
+	elif ((USE_SNAPSHOT)) ; then
+	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces, ${C_VAL}$NUM_NAMESPACES${C_RST} DataVolumes, ${C_VAL}$NUM_NAMESPACES${C_RST} VolumeSnapshots, and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines"
+	elif [[ -n "$DATASOURCE" ]] ; then
+	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (direct DataSource clone, no base DVs)"
+	else
+	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces, ${C_VAL}$NUM_NAMESPACES${C_RST} DataVolumes, and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (no snapshots)"
+	fi
+
+	write_batch_manifest
 
 	if ((ssh_verify_failed)); then
 	    fatal "SSH port check failed for one or more VMs (timeout ${SSH_READY_TIMEOUT}s). See log and ${LOG_DIR}/batch-${BATCH_ID}.ssh-ready.json"
@@ -3467,43 +3500,57 @@ print("ssh_failed_line=%s" % shlex.quote(",".join(d.get("vm_ssh_failed") or []))
     fi
 }
 
-# Run delete or create
-validate_delete_and_profile_options
-setup_logging
-if (( DELETE_ALL )) ; then
-    if ((wet_run)) ; then
-	ensure_oc_ready
-    fi
-    delete_all_batches
-elif [[ -n "$DELETE_BATCH" ]] ; then
-    if ((wet_run)) ; then
-	ensure_oc_ready
-    fi
-    delete_batch "$DELETE_BATCH"
-else
-    if [[ -n "$PROFILE_TARGET" ]] ; then
+# Run delete or create. Uses globals set by parse_cli_args.
+run_dispatch() {
+    validate_delete_and_profile_options
+    setup_logging
+    if (( DELETE_ALL )) ; then
 	if ((wet_run)) ; then
-	    ensure_profiler_binary
-	    ensure_profiler_feature_gate
-	    profiler_start
-	else
-	    echo "(dry-run) Would ensure cluster-profiler binary is available"
-	    echo "(dry-run) Would check/enable ClusterProfiler feature gate"
-	    echo "(dry-run) Would start profiling before VM creation"
+	    ensure_oc_ready
+	fi
+	delete_all_batches
+    elif [[ -n "$DELETE_BATCH" ]] ; then
+	if ((wet_run)) ; then
+	    ensure_oc_ready
+	fi
+	delete_batch "$DELETE_BATCH"
+    else
+	if [[ -n "$PROFILE_TARGET" ]] ; then
+	    if ((wet_run)) ; then
+		ensure_profiler_binary
+		ensure_profiler_feature_gate
+		profiler_start
+	    else
+		echo "(dry-run) Would ensure cluster-profiler binary is available"
+		echo "(dry-run) Would check/enable ClusterProfiler feature gate"
+		echo "(dry-run) Would start profiling before VM creation"
+	    fi
+	fi
+	main
+	if [[ -n "$PROFILE_TARGET" ]] ; then
+	    if ((wet_run)) ; then
+		profiler_prompt_and_stop
+	    else
+		echo "(dry-run) Would prompt to stop profiling and dump results"
+	    fi
 	fi
     fi
-    main
-    if [[ -n "$PROFILE_TARGET" ]] ; then
-	if ((wet_run)) ; then
-	    profiler_prompt_and_stop
-	else
-	    echo "(dry-run) Would prompt to stop profiling and dump results"
-	fi
-    fi
-fi
 
-# Print dry-run YAML file location
-if [[ -n "${DRYRUN_FILE:-}" && -f "${DRYRUN_FILE:-}" ]] ; then
-    echo ""
-    echo "Dry-run YAML saved to: ${C_VAL}$DRYRUN_FILE${C_RST}"
+    # Print dry-run YAML file location
+    if [[ -n "${DRYRUN_FILE:-}" && -f "${DRYRUN_FILE:-}" ]] ; then
+	echo ""
+	echo "Dry-run YAML saved to: ${C_VAL}$DRYRUN_FILE${C_RST}"
+    fi
+}
+
+# Entry point: parse arguments then run the requested action.
+run_cli() {
+    parse_cli_args "$@"
+    run_dispatch
+}
+
+# Source guard: only run when executed directly, not when sourced (e.g. by
+# unit tests that want to call individual functions in isolation).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    run_cli "$@"
 fi
