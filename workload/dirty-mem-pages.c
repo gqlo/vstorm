@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <ctype.h>
+#include <math.h>
 
 static void usage(const char *prog) {
     fprintf(stderr,
@@ -19,13 +20,13 @@ static void usage(const char *prog) {
             prog);
 }
 
-/* Parses a string into bytes. Supports fractions (0.1-0.9) and units (K, M, G, T). */
+/* Parses a string into bytes. Supports fractions (0.1-0.9) and units (B, K, M, G, T). */
 static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes) {
     char *endptr = NULL;
     errno = 0;
     double val = strtod(str, &endptr);
 
-    if (errno != 0 || endptr == str) {
+    if (errno != 0 || endptr == str || !isfinite(val) || val <= 0.0) {
         return -1;
     }
 
@@ -34,9 +35,6 @@ static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes)
     }
 
     if (*endptr == '\0') {
-        if (val <= 0.0)
-            return -1;
-
         if (val < 1.0) {
             if (val < 0.1 || val > 0.9)
                 return -2;
@@ -61,6 +59,7 @@ static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes)
 
     double multiplier = 1.0;
     switch (unit) {
+        case 'b': multiplier = 1.0; break;
         case 'k': multiplier = 1024.0; break;
         case 'm': multiplier = 1024.0 * 1024.0; break;
         case 'g': multiplier = 1024.0 * 1024.0 * 1024.0; break;

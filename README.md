@@ -2,7 +2,7 @@
 
 - Scale up hundreds of VMs across multiple namespaces with one command on OpenShift Virtualization, without writing YAML.
 - Auto-detects storage access modes, clone strategy, and snapshot support so it works with OCS/Ceph, LVMS, NFS, or any block- or filesystem-capable storage class.
-- **Cloud-init** injects workloads at boot (e.g. stress-ng, fio). For steady dirty anonymous memory, `workload/cloudinit-dirty-mem-pages.yaml` installs a C program, compiles it on first boot, and runs it under systemd; tune the dirty page ratio with `--env DIRTY_RATE_FRACTION` (a fraction of guest physical RAM).
+- **Cloud-init** injects workloads at boot (e.g. stress-ng, fio). For steady dirty anonymous memory, `workload/cloudinit-dirty-mem-pages.yaml` installs a C program, compiles it on first boot, and runs it under systemd; tune the amount with `--env DIRTY_RATE_FRACTION` (a fraction of guest physical RAM, a byte count, or a human-readable size such as `2G`).
 - **Self-built minimal guests** (high-density VM testing): a stripped x86_64-only kernel and small rootfs, often on the order of ~80 MB per guest, so you can pack many VMs onto finite CPU and RAM and stress scheduling, networking, and storage. Host the disk where the cluster can import it (for example `--dv-url` or your DataSource). Example layout and image live under [`custom-build-images/`](custom-build-images/).
 - **`--profile`**: integrated cluster profiling captures Go runtime pprof data (CPU, heap, mutex, and more) from the KubeVirt control plane during batch runs.
 - **Quality**: 257 `bats` tests, live cluster validation, and CI on every push (as of July 2026).
@@ -157,7 +157,7 @@ vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespa
 # stress-ng with env overrides (repeatable --env); e.g. WORKLOAD_TYPE=cpu-heavy|balanced
 vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
 
-# Steady anonymous dirty memory: compiles workload/dirty-mem-pages.c on first boot; DIRTY_RATE_FRACTION is a fraction of total physical RAM (0.1–0.9; default 0.5 if --env omitted)
+# Steady anonymous dirty memory: compiles workload/dirty-mem-pages.c on first boot; DIRTY_RATE_FRACTION accepts a fraction of RAM (0.1–0.9), a byte count (e.g. 1073741824), or a size (e.g. 512M, 2G); capped at 90% of RAM; default 0.5 if --env omitted
 vstorm --cores=4 --memory=8Gi --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --dv-url=http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow --env DIRTY_RATE_FRACTION=0.4 --vms=1
 
 # fio storage I/O workload (randrw default); presets and tunables in docs/cloud-init-fio-workload.md
@@ -329,7 +329,7 @@ helpers/
 workload/
   cloudinit-stress-ng-workload.yaml  # unified stress-ng workload (WORKLOAD_TYPE, env overrides)
   cloudinit-fio-workload.yaml        # fio storage I/O workload (WORKLOAD_TYPE, env overrides)
-  cloudinit-dirty-mem-pages.yaml     # compile to dirty-mem-pages; --env DIRTY_RATE_FRACTION=0.1-0.9
+  cloudinit-dirty-mem-pages.yaml     # compile to dirty-mem-pages; --env DIRTY_RATE_FRACTION=0.1-0.9 | bytes | size (e.g. 2G)
   dirty-mem-pages.c                  # source for dirty-mem workload (embedded in cloud-init YAML)
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)

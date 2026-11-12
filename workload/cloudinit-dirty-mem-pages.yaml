@@ -2,7 +2,9 @@
 preserve_hostname: false
 # Dirty-rate guest workload (compile + systemd). vstorm example:
 #   ./vstorm ... --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --env DIRTY_RATE_FRACTION=0.4
-# DIRTY_RATE_FRACTION is a fraction of total physical RAM (0.1–0.9, e.g. 0.9 = 90%); see dirty-mem-pages.c.
+# DIRTY_RATE_FRACTION accepts a fraction of total physical RAM (0.1–0.9, e.g. 0.9 = 90%),
+# an explicit byte count (e.g. 1073741824), or a human-readable size (e.g. 512M, 2G, 4KB, 1.5G);
+# sizes are capped at 90% of RAM. See dirty-mem-pages.c.
 # Default 0.5 if --env omitted (Environment= in the systemd unit).
 ssh_pwauth: true
 disable_root: false
@@ -29,6 +31,7 @@ write_files:
       #include <unistd.h>
       #include <sys/mman.h>
       #include <ctype.h>
+      #include <math.h>
       static void usage(const char *prog) {
           fprintf(stderr,
                   "usage: %s <value>\n"
@@ -39,20 +42,18 @@ write_files:
                   "  pass per second (dirty rate equals buffer size per second).\n",
                   prog);
       }
-      /* Parses a string into bytes. Supports fractions (0.1-0.9) and units (K, M, G, T). */
+      /* Parses a string into bytes. Supports fractions (0.1-0.9) and units (B, K, M, G, T). */
       static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes) {
           char *endptr = NULL;
           errno = 0;
           double val = strtod(str, &endptr);
-          if (errno != 0 || endptr == str) {
+          if (errno != 0 || endptr == str || !isfinite(val) || val <= 0.0) {
               return -1;
           }
           while (isspace((unsigned char)*endptr)) {
               endptr++;
           }
           if (*endptr == '\0') {
-              if (val <= 0.0)
-                  return -1;
               if (val < 1.0) {
                   if (val < 0.1 || val > 0.9)
                       return -2;
@@ -72,6 +73,7 @@ write_files:
               return -1;
           double multiplier = 1.0;
           switch (unit) {
+              case 'b': multiplier = 1.0; break;
               case 'k': multiplier = 1024.0; break;
               case 'm': multiplier = 1024.0 * 1024.0; break;
               case 'g': multiplier = 1024.0 * 1024.0 * 1024.0; break;
@@ -291,7 +293,7 @@ write_files:
     permissions: '0644'
     content: |
       [Unit]
-      Description=Dirty anonymous pages at a steady rate (fraction of RAM; see dirty-mem-pages.c)
+      Description=Dirty anonymous pages at a steady rate (fraction of RAM, byte count, or size; see dirty-mem-pages.c)
       After=network.target vstorm-boot-timestamp.service
       Wants=vstorm-boot-timestamp.service
       [Service]
