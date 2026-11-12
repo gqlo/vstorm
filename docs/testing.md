@@ -75,9 +75,11 @@ One test per README Quick Start example. Each validates the full YAML output end
 
 The file [workload/cloudinit-dirty-mem-pages.yaml](../workload/cloudinit-dirty-mem-pages.yaml)
 installs `gcc`, writes `dirty-mem-pages.c`, compiles to `/usr/local/bin/dirty-mem-pages`, and starts
-`dirty-mem-pages.service`. The RAM fraction is passed from the host with
-**`--env DIRTY_RATE_FRACTION=`*value*** (0.1–0.9). If `--env` is not used, the service defaults to
-**0.5** via `Environment=` in the unit file.
+`dirty-mem-pages.service`. The target memory size is passed from the host with
+**`--env DIRTY_RATE_FRACTION=`*value***, where *value* is a fraction of RAM (0.1–0.9), an explicit
+byte count (e.g. `1073741824`), or a human-readable size (e.g. `512M`, `2G`, `4KB`, `1.5G`); sizes
+are capped at 90% of RAM. If `--env` is not used, the service defaults to **0.5** via
+`Environment=` in the unit file.
 
 Example dry-run:
 
