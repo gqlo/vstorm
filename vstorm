@@ -3181,6 +3181,41 @@ profiler_prompt_and_stop() {
 # mode). Pure logging from globals; no side effects on the cluster.
 # Write the batch manifest file, per-batch DV/SSH JSON sidecars, and POST the
 # final result metadata. Extracted from main for readability/testability.
+# Read a JSON object from a file and emit `shellvar=shell-quoted-value` lines
+# for eval, one per spec. Reads the file (not argv) to avoid MAX_ARG_STRLEN on
+# large payloads. Spec forms:
+#   jsonkey=shellvar         scalar value (missing/falsy -> empty string)
+#   key1,key2=shellvar       first truthy of the listed keys (fallback)
+#   @listkey=shellvar        comma-joined elements of a JSON array
+# A missing "=shellvar" reuses the key spec as the variable name.
+_json_fields_to_shell() {
+    local file=$1; shift
+    FILE="$file" python3 -I - "$@" <<'PY'
+import json, os, shlex, sys
+try:
+    d = json.load(open(os.environ["FILE"], encoding="utf-8"))
+    if not isinstance(d, dict):
+        d = {}
+except Exception:
+    d = {}
+for spec in sys.argv[1:]:
+    keyspec, _, var = spec.partition("=")
+    if not var:
+        var = keyspec
+    if keyspec.startswith("@"):
+        lst = d.get(keyspec[1:]) or []
+        val = ",".join(str(x) for x in lst) if isinstance(lst, list) else ""
+    else:
+        val = ""
+        for k in keyspec.split(","):
+            v = d.get(k)
+            if v:
+                val = v
+                break
+    print("%s=%s" % (var, shlex.quote(str(val or ""))))
+PY
+}
+
 write_batch_manifest() {
 	local ns key
 	# Write batch manifest file
@@ -3211,47 +3246,25 @@ write_batch_manifest() {
 	local dv_created_at_line="" pvc_created_at_line="" dv_ready_at_line="" pvc_bound_at_line=""
 	local ssh_ready_at_line="" ssh_ready_status_line="" ssh_failed_line=""
 	# One python pass via file — avoid MAX_ARG_STRLEN on large DV_CREATED_JSON.
-	eval "$(
-	    python3 -c '
-import json, shlex, sys
-path = sys.argv[1]
-try:
-    d = json.load(open(path, encoding="utf-8"))
-except Exception:
-    d = {}
-keys = [
-    ("base_dv_created_at", "base_dv_created_at_line"),
-    ("base_dv_ready_at", "base_dv_ready_at_line"),
-    ("base_dv_bound_at", "base_dv_bound_at_line"),
-    ("snapshot_created_at", "snapshot_created_at_line"),
-    ("snapshot_ready_at", "snapshot_ready_at_line"),
-    ("dv_created_at", "dv_created_at_line"),
-    ("dv_ready_at", "dv_ready_at_line"),
-    ("pvc_created_at", "pvc_created_at_line"),
-]
-for src, dest in keys:
-    print("%s=%s" % (dest, shlex.quote(str(d.get(src) or ""))))
-bound = d.get("pvc_bound_at") or d.get("dv_bound_at") or ""
-print("pvc_bound_at_line=%s" % shlex.quote(str(bound)))
-' "$dv_summary_file" 2>/dev/null || true
-	)"
+	eval "$(_json_fields_to_shell "$dv_summary_file" \
+	    base_dv_created_at=base_dv_created_at_line \
+	    base_dv_ready_at=base_dv_ready_at_line \
+	    base_dv_bound_at=base_dv_bound_at_line \
+	    snapshot_created_at=snapshot_created_at_line \
+	    snapshot_ready_at=snapshot_ready_at_line \
+	    dv_created_at=dv_created_at_line \
+	    dv_ready_at=dv_ready_at_line \
+	    pvc_created_at=pvc_created_at_line \
+	    pvc_bound_at,dv_bound_at=pvc_bound_at_line 2>/dev/null || true)"
 	rm -f "$dv_summary_file"
 	if [[ -n "${BATCH_SSH_JSON:-}" && "$BATCH_SSH_JSON" != "{}" ]]; then
 	    local ssh_summary_file
 	    ssh_summary_file=$(mktemp)
 	    printf '%s\n' "$BATCH_SSH_JSON" > "$ssh_summary_file"
-	    eval "$(
-		python3 -c '
-import json, shlex, sys
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    d = {}
-print("ssh_ready_at_line=%s" % shlex.quote(str(d.get("ssh_ready_at") or "")))
-print("ssh_ready_status_line=%s" % shlex.quote(str(d.get("ssh_ready_status") or "")))
-print("ssh_failed_line=%s" % shlex.quote(",".join(d.get("vm_ssh_failed") or [])))
-' "$ssh_summary_file" 2>/dev/null || true
-	    )"
+	    eval "$(_json_fields_to_shell "$ssh_summary_file" \
+		ssh_ready_at=ssh_ready_at_line \
+		ssh_ready_status=ssh_ready_status_line \
+		@vm_ssh_failed=ssh_failed_line 2>/dev/null || true)"
 	    rm -f "$ssh_summary_file"
 	fi
 	for ((ns=1; ns<=NUM_NAMESPACES; ns++)); do

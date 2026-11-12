@@ -169,6 +169,34 @@ setup() {
 }
 
 # ---------------------------------------------------------------
+# _json_fields_to_shell
+# ---------------------------------------------------------------
+@test "_json_fields_to_shell emits scalar, fallback, and joined fields" {
+    local tmp
+    tmp=$(mktemp)
+    cat > "$tmp" <<'J'
+{"a":"x","dv_bound_at":"B","list":["p/1","q/2"]}
+J
+    run _json_fields_to_shell "$tmp" a=a_line pvc_bound_at,dv_bound_at=bound_line @list=list_line missing=missing_line
+    rm -f "$tmp"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"a_line=x"* ]]
+    [[ "$output" == *"bound_line=B"* ]]
+    [[ "$output" == *"list_line=p/1,q/2"* ]]
+    [[ "$output" == *"missing_line=''"* ]]
+}
+
+@test "_json_fields_to_shell tolerates malformed JSON (empty values, exit 0)" {
+    local tmp
+    tmp=$(mktemp)
+    echo "not json" > "$tmp"
+    run _json_fields_to_shell "$tmp" foo=foo_line
+    rm -f "$tmp"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"foo_line=''"* ]]
+}
+
+# ---------------------------------------------------------------
 # derive_defaults (basename/pvc derivation)
 # ---------------------------------------------------------------
 @test "derive_defaults derives basename and pvc name from datasource" {
