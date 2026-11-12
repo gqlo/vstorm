@@ -7,7 +7,11 @@ vstorm uses [Bats](https://github.com/bats-core/bats-core) (Bash Automated Testi
 There are two layers of tests:
 
 - **End-to-end CLI tests** (the bulk of the suite) run `vstorm` as a subprocess and assert on its output.
-- **Unit tests** (`tests/90-unit-pure-functions.bats`) `source` `vstorm` and call individual functions directly — no subprocess, no mock `oc`. This is possible because `vstorm` guards its dispatch behind `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`, so sourcing defines every function without parsing argv or touching a cluster. These tests run in well under a second and cover the pure/validation helpers (`join_name`, `validate_subnet`, `parse_service_value`, `parse_bool_flag`, `derive_defaults`, `is_vstorm_batch_namespace`, …).
+- **Unit tests** (`tests/90-unit-pure-functions.bats`) `source` `vstorm` and call individual functions directly —
+  no subprocess, no mock `oc`. This is possible because `vstorm` guards its dispatch behind
+  `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`, so sourcing defines every function without parsing argv or touching a
+  cluster. These tests run in well under a second and cover the pure/validation and detection helpers (`join_name`,
+  `validate_subnet`, `parse_service_value`, `parse_bool_flag`, `_apply_simple_option`, `detect_access_mode`, …).
 
 The end-to-end tests use **dry-run mode** (`-n` or `-q`) unless they need live-mode behavior (StorageProfile auto-detection, WFFC handling), in which case they use a **mock `oc`** script. No real cluster is required.
 
