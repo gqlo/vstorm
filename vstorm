@@ -10,9 +10,13 @@ set -eu
 # Close inherited file descriptors above stderr.
 # Prevents subshell deadlocks when invoked from environments (e.g. git hooks,
 # CI runners) that leave extra fds open for lock files or IPC.
-for _fd in 3 4 5 6 7 8 9; do
-    eval "exec $_fd>&-" 2>/dev/null || true
-done
+# Skipped when the script is sourced (e.g. by unit tests) so we don't close
+# file descriptors the sourcing process relies on (bats uses fd 3).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    for _fd in 3 4 5 6 7 8 9; do
+	eval "exec $_fd>&-" 2>/dev/null || true
+    done
+fi
 
 # Configuration variables - modify these as needed
 DATASOURCE=
@@ -51,8 +55,10 @@ VM_CPU_CORES="1"
 VM_MEMORY="1Gi"
 # Guest firmware: efi (OVMF + SMM; secureBoot false by default) or bios (legacy)
 VM_FIRMWARE="efi"
-# YAML templates live in templates/ next to this script.
-BUILTIN_TEMPLATES_DIR="$(cd "$(dirname "$0")" && pwd)/templates"
+# YAML templates live in templates/ next to this script. Resolve relative to
+# BASH_SOURCE (the vstorm file), not $0, so bundled templates are found even when
+# the script is sourced (e.g. by unit tests) rather than executed directly.
+BUILTIN_TEMPLATES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/templates"
 VM_CPU_REQUEST=
 VM_MEMORY_REQUEST=
 CLOUDINIT_FILE=
@@ -412,8 +418,75 @@ EOF
     exit 0
 }
 
+# Set a boolean variable (passed by name) from a flag value.
+# An empty value (bare flag, e.g. --wait) means true. Accepts the synonyms
+# 1/true/yes/on and 0/false/no/off (case-insensitive); fatals otherwise.
+# Usage: parse_bool_flag VARNAME "$value" "--flag-name"
+parse_bool_flag() {
+    local -n _ref=$1
+    local value=${2:-} flag=$3
+    case "${value,,}" in
+	''|1|true|yes|on) _ref=1 ;;
+	0|false|no|off)   _ref=0 ;;
+	*) fatal "Invalid $flag value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
+    esac
+}
+
+# Registry of "simple" long options that just assign a value to a variable
+# (and optionally set a companion *_SET flag). Each entry is
+# "normalized-glob-pattern:TARGET_VAR[:SET_FLAG_VAR]". Normalized means the
+# option name with '-'/'_' stripped and lowercased, matching process_option's
+# normalization. Order matters: more specific globs come first (e.g. vmsper*
+# before vms*), mirroring the original case statement. To add a new simple
+# option, add one line here (and a help entry + completion entry); options with
+# side effects beyond a value+flag stay as explicit cases in process_option.
+_VSTORM_SIMPLE_OPTS=(
+    "batchid:BATCH_ID:BATCH_ID_SET"
+    "datasourc*:DATASOURCE"
+    "storagecl*:STORAGE_CLASS:STORAGE_CLASS_SET"
+    "storagesi*:STORAGE_SIZE"
+    "storage:STORAGE_SIZE"
+    "datadisksi*:DATA_DISK_SIZE"
+    "accessmod*:ACCESS_MODE:ACCESS_MODE_SET"
+    "volumemod*:VOLUME_MODE:VOLUME_MODE_SET"
+    "pvc*:BASE_PVC_NAME:PVC_BASE_NAME_SET"
+    "base*:VM_BASENAME:BASENAME_SET"
+    "core*:VM_CPU_CORES"
+    "mem*:VM_MEMORY"
+    "requestm*:VM_MEMORY_REQUEST"
+    "requestc*:VM_CPU_REQUEST"
+    "vmsper*:NUM_VMS_PER_NAMESPACE"
+    "vms*:NUM_VMS"
+    "namesp*:NUM_NAMESPACES"
+    "runstrat*:RUN_STRATEGY"
+    "cloudinit:CLOUDINIT_FILE"
+)
+
+# Apply a simple value option from _VSTORM_SIMPLE_OPTS.
+# Args: $1 = normalized option name, $2 = value.
+# Returns 0 if a registry entry matched (and was applied), 1 otherwise.
+_apply_simple_option() {
+    local opt=$1 value=$2 entry pat var setflag
+    for entry in "${_VSTORM_SIMPLE_OPTS[@]}"; do
+	IFS=: read -r pat var setflag <<< "$entry"
+	# shellcheck disable=SC2053  # intentional glob match of $pat
+	if [[ "$opt" == $pat ]]; then
+	    local -n _v=$var
+	    _v=$value
+	    if [[ -n "$setflag" ]]; then
+		local -n _f=$setflag
+		_f=1
+	    fi
+	    return 0
+	fi
+    done
+    return 1
+}
+
 # Process long options.  Handle options names case-insensitive
 # and allow either -, _, or neither in names.
+# Simple value options live in the _VSTORM_SIMPLE_OPTS registry (handled by the
+# default case); options with extra side effects are explicit cases here.
 process_option() {
     local optstr=${1:-}
     local option=
@@ -424,43 +497,20 @@ process_option() {
     option=${option//-/}
     # Convert the option to lowercase for case-insensitive matching
     case "${option,,}" in
-	batchid)   BATCH_ID=$value; BATCH_ID_SET=1 ;;
 	delete)    [[ -n "$value" ]] || fatal "--delete requires a batch ID (e.g. --delete=abc123)"
 		   DELETE_BATCH=$value ;;
 	deleteall) DELETE_ALL=1 ;;
 	yes)       CONFIRM_DELETE=1 ;;
-	datasourc*) DATASOURCE=$value ;;
 	dvurl)     DV_URL=$value; DATASOURCE= ;;
-	storagecl*) STORAGE_CLASS=$value; STORAGE_CLASS_SET=1 ;;
-	storagesi*|storage) STORAGE_SIZE=$value ;;
-	datadisksi*|datadisksize) DATA_DISK_SIZE=$value ;;
-	accessmod*|accessmode) ACCESS_MODE=$value; ACCESS_MODE_SET=1 ;;
-	volumemod*|volumemode) VOLUME_MODE=$value; VOLUME_MODE_SET=1 ;;
 	snapshotcl*) SNAPSHOT_CLASS=$value; SNAPSHOT_CLASS_SET=1; USE_SNAPSHOT=1; SNAPSHOT_EXPLICITLY_SET=1 ;;
 	nosnapshot) USE_SNAPSHOT=0; SNAPSHOT_EXPLICITLY_SET=1 ;;
-	pvc*)      BASE_PVC_NAME=$value; PVC_BASE_NAME_SET=1 ;;
-	base*)	   VM_BASENAME=$value; BASENAME_SET=1 ;;
-	core*)	   VM_CPU_CORES=$value ;;
-	mem*)	   VM_MEMORY=$value ;;
 	firmware)
 	    case "${value,,}" in
 		bios|efi) VM_FIRMWARE=${value,,} ;;
 		*) fatal "Invalid --firmware='$value'; use bios or efi" ;;
 	    esac
 	    ;;
-	requestm*) VM_MEMORY_REQUEST=$value ;;
-	requestc*) VM_CPU_REQUEST=$value ;;
-	vmsper*)   NUM_VMS_PER_NAMESPACE=$value ;;
-	vms*)	   NUM_VMS=$value ;;
-	namesp*)   NUM_NAMESPACES=$value ;;
-	nssequentialcreation) case "${value,,}" in
-		       '') NS_SEQUENTIAL_CREATION=1 ;;  # --ns-sequential-creation with no value
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) NS_SEQUENTIAL_CREATION=0 ;;
-		           *) NS_SEQUENTIAL_CREATION=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --ns-sequential-creation value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
+	nssequentialcreation) parse_bool_flag NS_SEQUENTIAL_CREATION "$value" "--ns-sequential-creation" ;;
 	udnl2)
 	    UDN_L2=1
 	    if [[ -n "$value" ]]; then
@@ -471,24 +521,12 @@ process_option() {
 	service)
 	    parse_service_value "$value"
 	    ;;
-	runstrat*) RUN_STRATEGY=$value ;;
-	wait)	   case "${value,,}" in
-		       '') WAIT=1 ;;  # --wait with no value
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) WAIT=0 ;;
-		           *) WAIT=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --wait value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
-	waitssh)   case "${value,,}" in
-		       '') WAIT_SSH=1; WAIT=1 ;;
-		       0|1|true|false|yes|no|on|off) case "${value,,}" in
-		           0|false|no|off) WAIT_SSH=0 ;;
-		           *) WAIT_SSH=1; WAIT=1 ;;
-		           esac ;;
-		       *) fatal "Invalid --wait-ssh value '$value'; use true, false, 1, 0, yes, no, on, or off" ;;
-		   esac ;;
-	cloudinit) CLOUDINIT_FILE=$value ;;
+	wait)	   parse_bool_flag WAIT "$value" "--wait" ;;
+	waitssh)   parse_bool_flag WAIT_SSH "$value" "--wait-ssh"
+		   # Use an `if` (not `(( )) &&`): a false WAIT_SSH must not leave a
+		   # nonzero status as the branch's result, which `set -e` would treat
+		   # as a parse failure and abort the run.
+		   if ((WAIT_SSH)); then WAIT=1; fi ;;
 	env)
 	    # Keep full KEY=VAL (including KEY= and KEY=a=b). Do not use $value from
 	    # IFS== read — a trailing '=' is dropped (RESULT_SERVER_URL= → RESULT_SERVER_URL).
@@ -502,44 +540,53 @@ process_option() {
 		   DATASOURCE=; DV_URL= ;;
 	createex*) RECREATE_EXISTING_VMS=1 ;;
 	profile)   PROFILE_TARGET=${value:-all} ;;
-	*) 	   fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
+	*) 	   _apply_simple_option "${option,,}" "$value" ||
+		       fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
     esac
 }
 
-# Normalize --env VAL to --env=VAL so getopts receives a value (space-separated form)
-_argv=()
-for ((_i=1; _i<=$#; _i++)); do
-    _arg="${@:_i:1}"
-    if [[ "$_arg" == --env && _i -lt $# ]]; then
-	_next="${@:_i+1:1}"
-	if [[ "$_next" != --* ]]; then
-	    _argv+=("--env=$_next")
-	    ((_i++))
-	    continue
+# Parse command-line arguments: normalize argv, run getopts, then derive
+# defaults and validate. Wrapped in a function (rather than run at file scope)
+# so the script can be sourced for unit testing without parsing argv or
+# touching the cluster. See run_cli / the source guard at the end of the file.
+parse_cli_args() {
+    local -a _argv=()
+    local _i _arg _next
+    local OPTIND=1 opt
+    # Normalize --env VAL to --env=VAL so getopts receives a value (space-separated form)
+    for ((_i=1; _i<=$#; _i++)); do
+	_arg="${@:_i:1}"
+	if [[ "$_arg" == --env && _i -lt $# ]]; then
+	    _next="${@:_i+1:1}"
+	    if [[ "$_next" != --* ]]; then
+		_argv+=("--env=$_next")
+		((_i++))
+		continue
+	    fi
 	fi
-    fi
-    _argv+=("$_arg")
-done
-set -- "${_argv[@]}"
+	_argv+=("$_arg")
+    done
+    set -- "${_argv[@]}"
 
-# process all the options one by one, - is treated as the option"-"
-# Leading : suppresses getopts default error so we can show our own message.
-while getopts ':nqyh-:' opt "$@" ; do
-    case "$opt" in
-	n) wet_run=0	    ;;
-	q) quiet=1; wet_run=0	    ;;
-	y) CONFIRM_DELETE=1	    ;;
-	h) help			    ;;
-	-) process_option "$OPTARG" ;;
-	*) fatal "Error: unrecognized option '-${OPTARG:-$opt}'. Run '$0 -h' to see all options." ;;
-    esac
-done
+    # process all the options one by one, - is treated as the option"-"
+    # Leading : suppresses getopts default error so we can show our own message.
+    while getopts ':nqyh-:' opt "$@" ; do
+	case "$opt" in
+	    n) wet_run=0	    ;;
+	    q) quiet=1; wet_run=0	    ;;
+	    y) CONFIRM_DELETE=1	    ;;
+	    h) help			    ;;
+	    -) process_option "$OPTARG" ;;
+	    *) fatal "Error: unrecognized option '-${OPTARG:-$opt}'. Run '$0 -h' to see all options." ;;
+	esac
+    done
 
-# clean all the optional arguments that have been processed by getopts so that the positional arguments are now the remaining arguments
-shift $((OPTIND-1))
+    # clean all the optional arguments that have been processed by getopts so that the positional arguments are now the remaining arguments
+    shift $((OPTIND-1))
 
-derive_defaults
-validate_args "$@"
+    derive_defaults
+    validate_args "$@"
+}
 
 # Function to log with timestamp
 # Output may be provided on command line; if not, it is
@@ -736,7 +783,7 @@ check_prerequisites() {
 # can populate without a consumer (clone VMs never mount the base PVC).
 detect_wffc_binding() {
     local bind_mode
-    bind_mode=$(oc get storageclass "$STORAGE_CLASS" -o jsonpath='{.volumeBindingMode}' 2>/dev/null) || true
+    bind_mode=$(oc_storageclass_binding_mode "$STORAGE_CLASS") || true
     if [[ "$bind_mode" == "WaitForFirstConsumer" ]] ; then
 	WAIT_FOR_FIRST_CONSUMER=1
 	DV_ANNOTATIONS='annotations:
@@ -773,15 +820,11 @@ detect_access_mode() {
     local detected=""
 
     # Prefer the access mode for the selected volumeMode
-    detected=$(oc get storageprofile "$STORAGE_CLASS" \
-	-o go-template="{{range .status.claimPropertySets}}{{if eq .volumeMode \"$VOLUME_MODE\"}}{{index .accessModes 0}}{{break}}{{end}}{{end}}" \
-	2>/dev/null) || true
+    detected=$(oc_storageprofile_access_mode_for_volmode "$STORAGE_CLASS" "$VOLUME_MODE") || true
 
     # Fall back to the first access mode in the StorageProfile
     if [[ -z "$detected" ]] ; then
-	detected=$(oc get storageprofile "$STORAGE_CLASS" \
-	    -o jsonpath='{.status.claimPropertySets[0].accessModes[0]}' \
-	    2>/dev/null) || true
+	detected=$(oc_storageprofile_first_access_mode "$STORAGE_CLASS") || true
     fi
 
     if [[ -n "$detected" ]] ; then
@@ -891,7 +934,7 @@ apply_default_cloudinit_if_needed() {
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
 	return 0
     fi
-    CLOUDINIT_FILE="$(dirname "$0")/workload/cloudinit-default.yaml"
+    CLOUDINIT_FILE="$(dirname "${BASH_SOURCE[0]}")/workload/cloudinit-default.yaml"
     if [[ ! -f "$CLOUDINIT_FILE" ]] ; then
 	fatal "Default cloud-init file not found: $CLOUDINIT_FILE"
     fi
@@ -986,6 +1029,28 @@ oc_apply() {
 	    cat
 	fi
     fi
+}
+
+# Thin, single-purpose wrappers around cluster-read `oc` calls used by the
+# storage auto-detection logic. Isolating them here gives tests a single seam:
+# redefine one of these after sourcing vstorm to exercise detect_access_mode /
+# detect_wffc_binding without a mock `oc` on PATH. Each echoes the raw value
+# (empty on failure) and never fails the caller.
+oc_storageclass_binding_mode() {
+    oc get storageclass "$1" -o jsonpath='{.volumeBindingMode}' 2>/dev/null || true
+}
+
+oc_storageprofile_access_mode_for_volmode() {
+    local sc=$1 volmode=$2
+    oc get storageprofile "$sc" \
+	-o go-template="{{range .status.claimPropertySets}}{{if eq .volumeMode \"$volmode\"}}{{index .accessModes 0}}{{break}}{{end}}{{end}}" \
+	2>/dev/null || true
+}
+
+oc_storageprofile_first_access_mode() {
+    oc get storageprofile "$1" \
+	-o jsonpath='{.status.claimPropertySets[0].accessModes[0]}' \
+	2>/dev/null || true
 }
 
 # Join non-empty name parts with '-'.
@@ -1483,7 +1548,7 @@ collect_batch_dv_created_json() {
 	printf '%s\n' '{}' > "$vs_file"
     fi
     local collector
-    collector="$(cd "$(dirname "$0")" && pwd)/monitoring/data-collector/collect_batch_dv_created.py"
+    collector="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/monitoring/data-collector/collect_batch_dv_created.py"
     out_json=$(
 	BASENAME="$VM_BASENAME" BATCH_ID="$BATCH_ID" \
 	VM_JSON_FILE="$vm_file" NS_JSON_FILE="$ns_file" \
@@ -1879,22 +1944,12 @@ wait_for_all_vms() {
     done
 }
 
-create_virtualmachines() {
-    local -i ns_start="${1:-1}" ns_end="${2:-$NUM_NAMESPACES}" force_wait="${3:-0}"
-    # NOTE: ns is deliberately "local -i" (only ever holds a namespace index),
-    # but vm must stay a plain (non-integer) local: wait_for_all_vms(), called
-    # from below, reuses this same variable name via bash's dynamic scoping
-    # (it has no "local vm" of its own) and assigns it "namespace/vm-name"
-    # strings. If vm had the -i attribute, that string assignment would be
-    # evaluated as arithmetic and blow up under `set -u` on the first
-    # non-numeric token (e.g. "vstorm: unbound variable").
-    local -i ns
-    local vm
-    log_message "${C_BOLD}Creating VirtualMachines...${C_RST}"
-    # One-time template setup (cloud-init, data disk, existing VM lookup, ...).
-    # Guarded so repeated calls -- one per --ns-sequential-creation namespace -- reuse it
-    # instead of recomputing/re-listing (e.g. `oc get vm -A`) every time.
-    if ((! VM_TEMPLATES_READY)) ; then
+# One-time per-run VM template setup: cloud-init Secret payload, resource
+# requests, firmware block, blank data-disk DataVolume template, and the
+# existing-VM lookup. Sets module-level (global) variables consumed by the
+# create loop in create_virtualmachines; guarded there by VM_TEMPLATES_READY
+# so it runs once even across --ns-sequential-creation groups.
+prepare_vm_templates() {
     VM_ID=1
 	if ((UDN_L2)); then
 		vm_file="${TEMPLATE_CACHE[vm-udn]}"
@@ -2054,7 +2109,26 @@ ${data_dv_template}"
 	    if [[ -n "$vm" ]] ; then existing_vms["$vm"]=1; fi
 	done <<< "$(oc get vm -A --no-headers | awk '{printf "%s/%s\n", $1, $2}')"
     fi
-    VM_TEMPLATES_READY=1
+}
+
+create_virtualmachines() {
+    local -i ns_start="${1:-1}" ns_end="${2:-$NUM_NAMESPACES}" force_wait="${3:-0}"
+    # NOTE: ns is deliberately "local -i" (only ever holds a namespace index),
+    # but vm must stay a plain (non-integer) local: wait_for_all_vms(), called
+    # from below, reuses this same variable name via bash's dynamic scoping
+    # (it has no "local vm" of its own) and assigns it "namespace/vm-name"
+    # strings. If vm had the -i attribute, that string assignment would be
+    # evaluated as arithmetic and blow up under `set -u` on the first
+    # non-numeric token (e.g. "vstorm: unbound variable").
+    local -i ns
+    local vm
+    log_message "${C_BOLD}Creating VirtualMachines...${C_RST}"
+    # One-time template setup (cloud-init, data disk, existing VM lookup, ...).
+    # Guarded so repeated calls -- one per --ns-sequential-creation namespace -- reuse it
+    # instead of recomputing/re-listing (e.g. `oc get vm -A`) every time.
+    if ((! VM_TEMPLATES_READY)) ; then
+	prepare_vm_templates
+	VM_TEMPLATES_READY=1
     fi
     for ((ns=ns_start; ns<=ns_end; ns++)); do
         namespace="${BATCH_ID}-ns-${ns}"
@@ -3160,10 +3234,136 @@ profiler_prompt_and_stop() {
 }
 
 
-################################################################
-# Main execution
-main() {
-    prepare_creation
+# Read a JSON object from a file and emit `shellvar=shell-quoted-value` lines
+# for eval, one per spec. Reads the file (not argv) to avoid MAX_ARG_STRLEN on
+# large payloads. Spec forms:
+#   jsonkey=shellvar         scalar value (missing/falsy -> empty string)
+#   key1,key2=shellvar       first truthy of the listed keys (fallback)
+#   @listkey=shellvar        comma-joined elements of a JSON array
+# A missing "=shellvar" reuses the key spec as the variable name.
+_json_fields_to_shell() {
+    local file=$1; shift
+    FILE="$file" python3 -I - "$@" <<'PY'
+import json, os, shlex, sys
+try:
+    d = json.load(open(os.environ["FILE"], encoding="utf-8"))
+    if not isinstance(d, dict):
+        d = {}
+except Exception:
+    d = {}
+for spec in sys.argv[1:]:
+    keyspec, _, var = spec.partition("=")
+    if not var:
+        var = keyspec
+    if keyspec.startswith("@"):
+        lst = d.get(keyspec[1:]) or []
+        val = ",".join(str(x) for x in lst) if isinstance(lst, list) else ""
+    else:
+        val = ""
+        for k in keyspec.split(","):
+            v = d.get(k)
+            if v:
+                val = v
+                break
+    print("%s=%s" % (var, shlex.quote(str(val or ""))))
+PY
+}
+
+# Write the batch manifest file, per-batch DV/SSH JSON sidecars, and POST the
+# final result metadata. Extracted from main for readability/testability.
+write_batch_manifest() {
+	local ns key
+	# Write batch manifest file
+	local manifest_file="${LOG_DIR}/batch-${BATCH_ID}.manifest"
+	local ns_list=""
+	local vm_list=""
+	local dv_created_json="{}"
+	# Early progress manifest: makes the batch visible on the dashboard
+	# right after VMs are created, well before large-scale DV cloning
+	# finishes. wait_for_batch_datavolumes_for_timestamps posts further
+	# progress updates as DVs become Ready/Bound; the final POST below
+	# always has the complete picture regardless.
+	if _result_server_url_configured; then
+	    dv_created_json=$(collect_batch_dv_created_json)
+	    BATCH_DV_CREATED_JSON="$dv_created_json"
+	    post_batch_result_metadata progress
+	fi
+	# Per-VM / blank data DVs are created with the VMs; wait for Succeeded
+	# so ready/bound timestamps are present even without --wait.
+	wait_for_batch_datavolumes_for_timestamps
+	dv_created_json=$(collect_batch_dv_created_json)
+	BATCH_DV_CREATED_JSON="$dv_created_json"
+	local dv_summary_file
+	dv_summary_file=$(mktemp)
+	printf '%s\n' "$dv_created_json" > "$dv_summary_file"
+	local base_dv_created_at_line="" base_dv_ready_at_line="" base_dv_bound_at_line=""
+	local snapshot_created_at_line="" snapshot_ready_at_line=""
+	local dv_created_at_line="" pvc_created_at_line="" dv_ready_at_line="" pvc_bound_at_line=""
+	local ssh_ready_at_line="" ssh_ready_status_line="" ssh_failed_line=""
+	# One python pass via file — avoid MAX_ARG_STRLEN on large DV_CREATED_JSON.
+	eval "$(_json_fields_to_shell "$dv_summary_file" \
+	    base_dv_created_at=base_dv_created_at_line \
+	    base_dv_ready_at=base_dv_ready_at_line \
+	    base_dv_bound_at=base_dv_bound_at_line \
+	    snapshot_created_at=snapshot_created_at_line \
+	    snapshot_ready_at=snapshot_ready_at_line \
+	    dv_created_at=dv_created_at_line \
+	    dv_ready_at=dv_ready_at_line \
+	    pvc_created_at=pvc_created_at_line \
+	    pvc_bound_at,dv_bound_at=pvc_bound_at_line 2>/dev/null || true)"
+	rm -f "$dv_summary_file"
+	if [[ -n "${BATCH_SSH_JSON:-}" && "$BATCH_SSH_JSON" != "{}" ]]; then
+	    local ssh_summary_file
+	    ssh_summary_file=$(mktemp)
+	    printf '%s\n' "$BATCH_SSH_JSON" > "$ssh_summary_file"
+	    eval "$(_json_fields_to_shell "$ssh_summary_file" \
+		ssh_ready_at=ssh_ready_at_line \
+		ssh_ready_status=ssh_ready_status_line \
+		@vm_ssh_failed=ssh_failed_line 2>/dev/null || true)"
+	    rm -f "$ssh_summary_file"
+	fi
+	for ((ns=1; ns<=NUM_NAMESPACES; ns++)); do
+	    local ns_name="${BATCH_ID}-ns-${ns}"
+	    ns_list="${ns_list:+${ns_list}, }${ns_name}"
+	done
+	for key in "${BATCH_VMS_ORDERED[@]+"${BATCH_VMS_ORDERED[@]}"}" ; do
+	    vm_list="${vm_list:+${vm_list}, }${key}"
+	done
+	cat > "$manifest_file" <<-MANIFEST
+	batch-id: $BATCH_ID
+	created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+	basename: $VM_BASENAME
+	total-vms: $NUM_VMS
+	total-namespaces: $NUM_NAMESPACES
+	namespaces: $ns_list
+	vms: $vm_list
+	base-dv-created-at: ${base_dv_created_at_line:-}
+	base-dv-ready-at: ${base_dv_ready_at_line:-}
+	base-dv-bound-at: ${base_dv_bound_at_line:-}
+	snapshot-created-at: ${snapshot_created_at_line:-}
+	snapshot-ready-at: ${snapshot_ready_at_line:-}
+	dv-created-at: ${dv_created_at_line:-}
+	dv-ready-at: ${dv_ready_at_line:-}
+	pvc-created-at: ${pvc_created_at_line:-}
+	pvc-bound-at: ${pvc_bound_at_line:-}
+	ssh-ready-at: ${ssh_ready_at_line:-}
+	ssh-ready-status: ${ssh_ready_status_line:-}
+	ssh-failed: ${ssh_failed_line:-}
+	MANIFEST
+	if [[ "$dv_created_json" != "{}" && -n "$dv_created_json" ]]; then
+	    printf '%s\n' "$dv_created_json" > "${LOG_DIR}/batch-${BATCH_ID}.dv-created.json"
+	fi
+	if [[ -n "${BATCH_SSH_JSON:-}" && "$BATCH_SSH_JSON" != "{}" ]]; then
+	    printf '%s\n' "$BATCH_SSH_JSON" > "${LOG_DIR}/batch-${BATCH_ID}.ssh-ready.json"
+	fi
+	log_message "Batch manifest written to: ${C_VAL}$manifest_file${C_RST}"
+
+	post_batch_result_metadata final
+}
+
+# Log the run configuration banner (batch id, source, storage, VM spec, wait
+# mode). Pure logging from globals; no side effects on the cluster.
+log_run_config() {
     log_message "${C_BOLD}Starting resource creation process...${C_RST}"
     log_message "Batch ID:      ${C_VAL}$BATCH_ID${C_RST}"
     log_message "Configuration: ${C_VAL}$NUM_VMS${C_RST} VMs across ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces"
@@ -3205,7 +3405,11 @@ main() {
     if ((NS_SEQUENTIAL_CREATION)); then
 	log_message "NS sequential: ${C_VAL}true${C_RST} (--ns-sequential-creation: one namespace at a time)"
     fi
+}
 
+# Create namespaces, DataVolumes, snapshots, VMs and services, either all at
+# once (default) or one namespace fully at a time (--ns-sequential-creation).
+run_creation_flow() {
     if ((NS_SEQUENTIAL_CREATION)) ; then
 	log_message "${C_BOLD}ns-sequential-creation enabled:${C_RST} creating/waiting one namespace at a time"
 	local -i seq_ns is_last_ns
@@ -3254,6 +3458,14 @@ main() {
 	    create_vm_service
 	fi
     fi
+}
+
+################################################################
+# Main execution
+main() {
+    prepare_creation
+    log_run_config
+    run_creation_flow
 
     # TODO: re-enable once verify_cloudinit is improved
     # if ((wet_run && WAIT)) && [[ -n "$CLOUDINIT_FILE" ]]; then
@@ -3283,114 +3495,7 @@ main() {
 	    log_message "Created ${C_VAL}$NUM_NAMESPACES${C_RST} namespaces, ${C_VAL}$NUM_NAMESPACES${C_RST} DataVolumes, and ${C_VAL}$NUM_VMS${C_RST} total VirtualMachines (no snapshots)"
 	fi
 
-	# Write batch manifest file
-	local manifest_file="${LOG_DIR}/batch-${BATCH_ID}.manifest"
-	local ns_list=""
-	local vm_list=""
-	local dv_created_json="{}"
-	# Early progress manifest: makes the batch visible on the dashboard
-	# right after VMs are created, well before large-scale DV cloning
-	# finishes. wait_for_batch_datavolumes_for_timestamps posts further
-	# progress updates as DVs become Ready/Bound; the final POST below
-	# always has the complete picture regardless.
-	if _result_server_url_configured; then
-	    dv_created_json=$(collect_batch_dv_created_json)
-	    BATCH_DV_CREATED_JSON="$dv_created_json"
-	    post_batch_result_metadata progress
-	fi
-	# Per-VM / blank data DVs are created with the VMs; wait for Succeeded
-	# so ready/bound timestamps are present even without --wait.
-	wait_for_batch_datavolumes_for_timestamps
-	dv_created_json=$(collect_batch_dv_created_json)
-	BATCH_DV_CREATED_JSON="$dv_created_json"
-	local dv_summary_file
-	dv_summary_file=$(mktemp)
-	printf '%s\n' "$dv_created_json" > "$dv_summary_file"
-	local base_dv_created_at_line="" base_dv_ready_at_line="" base_dv_bound_at_line=""
-	local snapshot_created_at_line="" snapshot_ready_at_line=""
-	local dv_created_at_line="" pvc_created_at_line="" dv_ready_at_line="" pvc_bound_at_line=""
-	local ssh_ready_at_line="" ssh_ready_status_line="" ssh_failed_line=""
-	# One python pass via file — avoid MAX_ARG_STRLEN on large DV_CREATED_JSON.
-	eval "$(
-	    python3 -c '
-import json, shlex, sys
-path = sys.argv[1]
-try:
-    d = json.load(open(path, encoding="utf-8"))
-except Exception:
-    d = {}
-keys = [
-    ("base_dv_created_at", "base_dv_created_at_line"),
-    ("base_dv_ready_at", "base_dv_ready_at_line"),
-    ("base_dv_bound_at", "base_dv_bound_at_line"),
-    ("snapshot_created_at", "snapshot_created_at_line"),
-    ("snapshot_ready_at", "snapshot_ready_at_line"),
-    ("dv_created_at", "dv_created_at_line"),
-    ("dv_ready_at", "dv_ready_at_line"),
-    ("pvc_created_at", "pvc_created_at_line"),
-]
-for src, dest in keys:
-    print("%s=%s" % (dest, shlex.quote(str(d.get(src) or ""))))
-bound = d.get("pvc_bound_at") or d.get("dv_bound_at") or ""
-print("pvc_bound_at_line=%s" % shlex.quote(str(bound)))
-' "$dv_summary_file" 2>/dev/null || true
-	)"
-	rm -f "$dv_summary_file"
-	if [[ -n "${BATCH_SSH_JSON:-}" && "$BATCH_SSH_JSON" != "{}" ]]; then
-	    local ssh_summary_file
-	    ssh_summary_file=$(mktemp)
-	    printf '%s\n' "$BATCH_SSH_JSON" > "$ssh_summary_file"
-	    eval "$(
-		python3 -c '
-import json, shlex, sys
-try:
-    d = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    d = {}
-print("ssh_ready_at_line=%s" % shlex.quote(str(d.get("ssh_ready_at") or "")))
-print("ssh_ready_status_line=%s" % shlex.quote(str(d.get("ssh_ready_status") or "")))
-print("ssh_failed_line=%s" % shlex.quote(",".join(d.get("vm_ssh_failed") or [])))
-' "$ssh_summary_file" 2>/dev/null || true
-	    )"
-	    rm -f "$ssh_summary_file"
-	fi
-	for ((ns=1; ns<=NUM_NAMESPACES; ns++)); do
-	    local ns_name="${BATCH_ID}-ns-${ns}"
-	    ns_list="${ns_list:+${ns_list}, }${ns_name}"
-	done
-	for key in "${BATCH_VMS_ORDERED[@]+"${BATCH_VMS_ORDERED[@]}"}" ; do
-	    vm_list="${vm_list:+${vm_list}, }${key}"
-	done
-	cat > "$manifest_file" <<-MANIFEST
-	batch-id: $BATCH_ID
-	created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-	basename: $VM_BASENAME
-	total-vms: $NUM_VMS
-	total-namespaces: $NUM_NAMESPACES
-	namespaces: $ns_list
-	vms: $vm_list
-	base-dv-created-at: ${base_dv_created_at_line:-}
-	base-dv-ready-at: ${base_dv_ready_at_line:-}
-	base-dv-bound-at: ${base_dv_bound_at_line:-}
-	snapshot-created-at: ${snapshot_created_at_line:-}
-	snapshot-ready-at: ${snapshot_ready_at_line:-}
-	dv-created-at: ${dv_created_at_line:-}
-	dv-ready-at: ${dv_ready_at_line:-}
-	pvc-created-at: ${pvc_created_at_line:-}
-	pvc-bound-at: ${pvc_bound_at_line:-}
-	ssh-ready-at: ${ssh_ready_at_line:-}
-	ssh-ready-status: ${ssh_ready_status_line:-}
-	ssh-failed: ${ssh_failed_line:-}
-	MANIFEST
-	if [[ "$dv_created_json" != "{}" && -n "$dv_created_json" ]]; then
-	    printf '%s\n' "$dv_created_json" > "${LOG_DIR}/batch-${BATCH_ID}.dv-created.json"
-	fi
-	if [[ -n "${BATCH_SSH_JSON:-}" && "$BATCH_SSH_JSON" != "{}" ]]; then
-	    printf '%s\n' "$BATCH_SSH_JSON" > "${LOG_DIR}/batch-${BATCH_ID}.ssh-ready.json"
-	fi
-	log_message "Batch manifest written to: ${C_VAL}$manifest_file${C_RST}"
-
-	post_batch_result_metadata final
+	write_batch_manifest
 
 	if ((ssh_verify_failed)); then
 	    fatal "SSH port check failed for one or more VMs (timeout ${SSH_READY_TIMEOUT}s). See log and ${LOG_DIR}/batch-${BATCH_ID}.ssh-ready.json"
@@ -3467,43 +3572,57 @@ print("ssh_failed_line=%s" % shlex.quote(",".join(d.get("vm_ssh_failed") or []))
     fi
 }
 
-# Run delete or create
-validate_delete_and_profile_options
-setup_logging
-if (( DELETE_ALL )) ; then
-    if ((wet_run)) ; then
-	ensure_oc_ready
-    fi
-    delete_all_batches
-elif [[ -n "$DELETE_BATCH" ]] ; then
-    if ((wet_run)) ; then
-	ensure_oc_ready
-    fi
-    delete_batch "$DELETE_BATCH"
-else
-    if [[ -n "$PROFILE_TARGET" ]] ; then
+# Run delete or create. Uses globals set by parse_cli_args.
+run_dispatch() {
+    validate_delete_and_profile_options
+    setup_logging
+    if (( DELETE_ALL )) ; then
 	if ((wet_run)) ; then
-	    ensure_profiler_binary
-	    ensure_profiler_feature_gate
-	    profiler_start
-	else
-	    echo "(dry-run) Would ensure cluster-profiler binary is available"
-	    echo "(dry-run) Would check/enable ClusterProfiler feature gate"
-	    echo "(dry-run) Would start profiling before VM creation"
+	    ensure_oc_ready
+	fi
+	delete_all_batches
+    elif [[ -n "$DELETE_BATCH" ]] ; then
+	if ((wet_run)) ; then
+	    ensure_oc_ready
+	fi
+	delete_batch "$DELETE_BATCH"
+    else
+	if [[ -n "$PROFILE_TARGET" ]] ; then
+	    if ((wet_run)) ; then
+		ensure_profiler_binary
+		ensure_profiler_feature_gate
+		profiler_start
+	    else
+		echo "(dry-run) Would ensure cluster-profiler binary is available"
+		echo "(dry-run) Would check/enable ClusterProfiler feature gate"
+		echo "(dry-run) Would start profiling before VM creation"
+	    fi
+	fi
+	main
+	if [[ -n "$PROFILE_TARGET" ]] ; then
+	    if ((wet_run)) ; then
+		profiler_prompt_and_stop
+	    else
+		echo "(dry-run) Would prompt to stop profiling and dump results"
+	    fi
 	fi
     fi
-    main
-    if [[ -n "$PROFILE_TARGET" ]] ; then
-	if ((wet_run)) ; then
-	    profiler_prompt_and_stop
-	else
-	    echo "(dry-run) Would prompt to stop profiling and dump results"
-	fi
-    fi
-fi
 
-# Print dry-run YAML file location
-if [[ -n "${DRYRUN_FILE:-}" && -f "${DRYRUN_FILE:-}" ]] ; then
-    echo ""
-    echo "Dry-run YAML saved to: ${C_VAL}$DRYRUN_FILE${C_RST}"
+    # Print dry-run YAML file location
+    if [[ -n "${DRYRUN_FILE:-}" && -f "${DRYRUN_FILE:-}" ]] ; then
+	echo ""
+	echo "Dry-run YAML saved to: ${C_VAL}$DRYRUN_FILE${C_RST}"
+    fi
+}
+
+# Entry point: parse arguments then run the requested action.
+run_cli() {
+    parse_cli_args "$@"
+    run_dispatch
+}
+
+# Source guard: only run when executed directly, not when sourced (e.g. by
+# unit tests that want to call individual functions in isolation).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    run_cli "$@"
 fi

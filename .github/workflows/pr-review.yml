@@ -343,14 +343,13 @@ jobs:
             - helpers/, workload/, tab-completion, and monitoring/ (Python + dashboard JS) changes
             - Test coverage (mandatory): 100% of new/changed functions must have corresponding
               tests — bats in tests/, monitoring/tests (unittest / node --test). Flag any
-              untested new/changed function as a real bug. Follow skill
-              .cursor/skills/require-corresponding-tests and rule require-corresponding-tests.
+              untested new/changed function as a real bug. See the "Testing" section of
+              AGENTS.md (corresponding tests required).
             - Docs/README updates when flags or user-facing behavior change
 
             Skip logs/, binary images, and unrelated generated artifacts.
-            Follow .cursor/rules (bash-standards, shell-safety, bats-testing,
-            require-corresponding-tests, yaml-templates) and
-            .cursor/skills/require-corresponding-tests when applicable.
+            Follow the conventions in AGENTS.md (Bash coding standards, shell safety,
+            Bats patterns, corresponding tests, YAML templates) when applicable.
 
             The PR branch is already checked out in the working directory.
 

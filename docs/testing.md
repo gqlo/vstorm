@@ -4,15 +4,40 @@ vstorm uses [Bats](https://github.com/bats-core/bats-core) (Bash Automated Testi
 
 ## How the tests work
 
-All tests use **dry-run mode** (`-n` or `-q`) unless they need live-mode behavior (StorageProfile auto-detection, WFFC handling), in which case they use a **mock `oc`** script. No real cluster is required.
+There are two layers of tests:
 
-Each test:
+- **End-to-end CLI tests** (the bulk of the suite) run `vstorm` as a subprocess and assert on its output.
+- **Unit tests** (`tests/90-unit-pure-functions.bats`) `source` `vstorm` and call individual functions directly —
+  no subprocess, no mock `oc`. This is possible because `vstorm` guards its dispatch behind
+  `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]`, so sourcing defines every function without parsing argv or touching a
+  cluster. These tests run in well under a second and cover the pure/validation and detection helpers (`join_name`,
+  `validate_subnet`, `parse_service_value`, `parse_bool_flag`, `_apply_simple_option`, `detect_access_mode`, …).
+
+The end-to-end tests use **dry-run mode** (`-n` or `-q`) unless they need live-mode behavior (StorageProfile auto-detection, WFFC handling), in which case they use a **mock `oc`** script. No real cluster is required.
+
+Each end-to-end test:
 
 1. Runs `vstorm` with a fixed `--batch-id` and specific flags
 2. Captures the full stdout/stderr via Bats `run`
 3. Asserts on the generated YAML: resource kinds, names, namespaces, labels, template fields, and counts
 
 This validates that the correct templates are selected, variables are substituted, and the creation flow (DV, snapshot/no-snapshot, VM, cloud-init Secret, UDN, vm-service) matches expectations.
+
+### Adding a unit test
+
+`vstorm` is sourceable, so a new unit test is just:
+
+```bash
+setup() { source "$BATS_TEST_DIRNAME/../vstorm"; }
+
+@test "my function does X" {
+    run my_function arg
+    [ "$status" -eq 0 ]
+    [ "$output" = "expected" ]
+}
+```
+
+Use `run` for functions that may call `fatal` (so the `exit` is captured), and call directly when you need to inspect globals a function mutates.
 
 ## Running tests locally
 
