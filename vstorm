@@ -742,7 +742,7 @@ check_prerequisites() {
 # can populate without a consumer (clone VMs never mount the base PVC).
 detect_wffc_binding() {
     local bind_mode
-    bind_mode=$(oc get storageclass "$STORAGE_CLASS" -o jsonpath='{.volumeBindingMode}' 2>/dev/null) || true
+    bind_mode=$(oc_storageclass_binding_mode "$STORAGE_CLASS") || true
     if [[ "$bind_mode" == "WaitForFirstConsumer" ]] ; then
 	WAIT_FOR_FIRST_CONSUMER=1
 	DV_ANNOTATIONS='annotations:
@@ -779,15 +779,11 @@ detect_access_mode() {
     local detected=""
 
     # Prefer the access mode for the selected volumeMode
-    detected=$(oc get storageprofile "$STORAGE_CLASS" \
-	-o go-template="{{range .status.claimPropertySets}}{{if eq .volumeMode \"$VOLUME_MODE\"}}{{index .accessModes 0}}{{break}}{{end}}{{end}}" \
-	2>/dev/null) || true
+    detected=$(oc_storageprofile_access_mode_for_volmode "$STORAGE_CLASS" "$VOLUME_MODE") || true
 
     # Fall back to the first access mode in the StorageProfile
     if [[ -z "$detected" ]] ; then
-	detected=$(oc get storageprofile "$STORAGE_CLASS" \
-	    -o jsonpath='{.status.claimPropertySets[0].accessModes[0]}' \
-	    2>/dev/null) || true
+	detected=$(oc_storageprofile_first_access_mode "$STORAGE_CLASS") || true
     fi
 
     if [[ -n "$detected" ]] ; then
@@ -992,6 +988,28 @@ oc_apply() {
 	    cat
 	fi
     fi
+}
+
+# Thin, single-purpose wrappers around cluster-read `oc` calls used by the
+# storage auto-detection logic. Isolating them here gives tests a single seam:
+# redefine one of these after sourcing vstorm to exercise detect_access_mode /
+# detect_wffc_binding without a mock `oc` on PATH. Each echoes the raw value
+# (empty on failure) and never fails the caller.
+oc_storageclass_binding_mode() {
+    oc get storageclass "$1" -o jsonpath='{.volumeBindingMode}' 2>/dev/null || true
+}
+
+oc_storageprofile_access_mode_for_volmode() {
+    local sc=$1 volmode=$2
+    oc get storageprofile "$sc" \
+	-o go-template="{{range .status.claimPropertySets}}{{if eq .volumeMode \"$volmode\"}}{{index .accessModes 0}}{{break}}{{end}}{{end}}" \
+	2>/dev/null || true
+}
+
+oc_storageprofile_first_access_mode() {
+    oc get storageprofile "$1" \
+	-o jsonpath='{.status.claimPropertySets[0].accessModes[0]}' \
+	2>/dev/null || true
 }
 
 # Join non-empty name parts with '-'.

@@ -197,6 +197,70 @@ J
 }
 
 # ---------------------------------------------------------------
+# Storage auto-detection via the oc_* read seam (no mock oc on PATH;
+# the wrapper functions are stubbed directly).
+# ---------------------------------------------------------------
+@test "detect_access_mode uses the StorageProfile access mode matching VOLUME_MODE" {
+    wet_run=0; ACCESS_MODE_SET=0; USE_SNAPSHOT=1
+    STORAGE_CLASS=my-sc; VOLUME_MODE=Block; ACCESS_MODE=ReadWriteMany
+    oc_storageprofile_access_mode_for_volmode() { echo "ReadWriteOnce"; }
+    oc_storageprofile_first_access_mode() { echo "SHOULD-NOT-BE-USED"; }
+    oc_storageclass_binding_mode() { echo "Immediate"; }
+    detect_access_mode
+    [ "$ACCESS_MODE" = "ReadWriteOnce" ]
+}
+
+@test "detect_access_mode falls back to the first StorageProfile access mode" {
+    wet_run=0; ACCESS_MODE_SET=0; USE_SNAPSHOT=1
+    STORAGE_CLASS=my-sc; VOLUME_MODE=Block; ACCESS_MODE=ReadWriteMany
+    oc_storageprofile_access_mode_for_volmode() { echo ""; }
+    oc_storageprofile_first_access_mode() { echo "ReadOnlyMany"; }
+    oc_storageclass_binding_mode() { echo "Immediate"; }
+    detect_access_mode
+    [ "$ACCESS_MODE" = "ReadOnlyMany" ]
+}
+
+@test "detect_access_mode keeps the default when StorageProfile is unavailable" {
+    wet_run=0; ACCESS_MODE_SET=0; USE_SNAPSHOT=1
+    STORAGE_CLASS=my-sc; VOLUME_MODE=Block; ACCESS_MODE=ReadWriteMany
+    oc_storageprofile_access_mode_for_volmode() { echo ""; }
+    oc_storageprofile_first_access_mode() { echo ""; }
+    oc_storageclass_binding_mode() { echo ""; }
+    detect_access_mode
+    [ "$ACCESS_MODE" = "ReadWriteMany" ]
+}
+
+@test "detect_access_mode respects an explicit --access-mode (no StorageProfile query)" {
+    wet_run=0; ACCESS_MODE_SET=1; USE_SNAPSHOT=1
+    STORAGE_CLASS=my-sc; VOLUME_MODE=Block; ACCESS_MODE=ReadWriteOnce
+    oc_storageprofile_access_mode_for_volmode() { echo "RWX-WRONG"; }
+    oc_storageprofile_first_access_mode() { echo "RWX-WRONG"; }
+    oc_storageclass_binding_mode() { echo "Immediate"; }
+    detect_access_mode
+    [ "$ACCESS_MODE" = "ReadWriteOnce" ]
+}
+
+@test "detect_wffc_binding disables snapshots and sets annotations on WFFC storage" {
+    wet_run=0; USE_SNAPSHOT=1; WAIT_FOR_FIRST_CONSUMER=0; DV_ANNOTATIONS=""
+    STORAGE_CLASS=my-sc
+    oc_storageclass_binding_mode() { echo "WaitForFirstConsumer"; }
+    detect_wffc_binding
+    [ "$WAIT_FOR_FIRST_CONSUMER" -eq 1 ]
+    [ "$USE_SNAPSHOT" -eq 0 ]
+    [ -n "$DV_ANNOTATIONS" ]
+}
+
+@test "detect_wffc_binding leaves Immediate-binding storage unchanged" {
+    wet_run=0; USE_SNAPSHOT=1; WAIT_FOR_FIRST_CONSUMER=0; DV_ANNOTATIONS=""
+    STORAGE_CLASS=my-sc
+    oc_storageclass_binding_mode() { echo "Immediate"; }
+    detect_wffc_binding
+    [ "$WAIT_FOR_FIRST_CONSUMER" -eq 0 ]
+    [ "$USE_SNAPSHOT" -eq 1 ]
+    [ -z "$DV_ANNOTATIONS" ]
+}
+
+# ---------------------------------------------------------------
 # derive_defaults (basename/pvc derivation)
 # ---------------------------------------------------------------
 @test "derive_defaults derives basename and pvc name from datasource" {
