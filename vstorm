@@ -3234,12 +3234,6 @@ profiler_prompt_and_stop() {
 }
 
 
-################################################################
-# Main execution
-# Log the run configuration banner (batch id, source, storage, VM spec, wait
-# mode). Pure logging from globals; no side effects on the cluster.
-# Write the batch manifest file, per-batch DV/SSH JSON sidecars, and POST the
-# final result metadata. Extracted from main for readability/testability.
 # Read a JSON object from a file and emit `shellvar=shell-quoted-value` lines
 # for eval, one per spec. Reads the file (not argv) to avoid MAX_ARG_STRLEN on
 # large payloads. Spec forms:
@@ -3275,6 +3269,8 @@ for spec in sys.argv[1:]:
 PY
 }
 
+# Write the batch manifest file, per-batch DV/SSH JSON sidecars, and POST the
+# final result metadata. Extracted from main for readability/testability.
 write_batch_manifest() {
 	local ns key
 	# Write batch manifest file
@@ -3365,6 +3361,8 @@ write_batch_manifest() {
 	post_batch_result_metadata final
 }
 
+# Log the run configuration banner (batch id, source, storage, VM spec, wait
+# mode). Pure logging from globals; no side effects on the cluster.
 log_run_config() {
     log_message "${C_BOLD}Starting resource creation process...${C_RST}"
     log_message "Batch ID:      ${C_VAL}$BATCH_ID${C_RST}"
@@ -3462,6 +3460,8 @@ run_creation_flow() {
     fi
 }
 
+################################################################
+# Main execution
 main() {
     prepare_creation
     log_run_config
