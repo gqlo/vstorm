@@ -197,6 +197,44 @@ J
 }
 
 # ---------------------------------------------------------------
+# _apply_simple_option (option registry)
+# ---------------------------------------------------------------
+@test "_apply_simple_option assigns value and companion SET flag" {
+    STORAGE_CLASS=default; STORAGE_CLASS_SET=0
+    _apply_simple_option storageclass my-sc
+    [ "$STORAGE_CLASS" = "my-sc" ]
+    [ "$STORAGE_CLASS_SET" -eq 1 ]
+}
+
+@test "_apply_simple_option matches glob abbreviations" {
+    VM_CPU_CORES=1; VM_MEMORY=1Gi
+    _apply_simple_option core 4
+    _apply_simple_option mem 8Gi
+    [ "$VM_CPU_CORES" = "4" ]
+    [ "$VM_MEMORY" = "8Gi" ]
+}
+
+@test "_apply_simple_option prefers vmsper* over vms*" {
+    NUM_VMS_PER_NAMESPACE=; NUM_VMS=1
+    _apply_simple_option vmspernamespace 3
+    [ "$NUM_VMS_PER_NAMESPACE" = "3" ]
+    [ "$NUM_VMS" = "1" ]
+}
+
+@test "_apply_simple_option matches exact 'storage' and glob 'storagesize'" {
+    STORAGE_SIZE=32Gi
+    _apply_simple_option storage 64Gi
+    [ "$STORAGE_SIZE" = "64Gi" ]
+    _apply_simple_option storagesize 128Gi
+    [ "$STORAGE_SIZE" = "128Gi" ]
+}
+
+@test "_apply_simple_option returns nonzero for an unknown option" {
+    run _apply_simple_option totallybogus x
+    [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------
 # Storage auto-detection via the oc_* read seam (no mock oc on PATH;
 # the wrapper functions are stubbed directly).
 # ---------------------------------------------------------------

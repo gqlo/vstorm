@@ -430,8 +430,61 @@ parse_bool_flag() {
     esac
 }
 
+# Registry of "simple" long options that just assign a value to a variable
+# (and optionally set a companion *_SET flag). Each entry is
+# "normalized-glob-pattern:TARGET_VAR[:SET_FLAG_VAR]". Normalized means the
+# option name with '-'/'_' stripped and lowercased, matching process_option's
+# normalization. Order matters: more specific globs come first (e.g. vmsper*
+# before vms*), mirroring the original case statement. To add a new simple
+# option, add one line here (and a help entry + completion entry); options with
+# side effects beyond a value+flag stay as explicit cases in process_option.
+_VSTORM_SIMPLE_OPTS=(
+    "batchid:BATCH_ID:BATCH_ID_SET"
+    "datasourc*:DATASOURCE"
+    "storagecl*:STORAGE_CLASS:STORAGE_CLASS_SET"
+    "storagesi*:STORAGE_SIZE"
+    "storage:STORAGE_SIZE"
+    "datadisksi*:DATA_DISK_SIZE"
+    "accessmod*:ACCESS_MODE:ACCESS_MODE_SET"
+    "volumemod*:VOLUME_MODE:VOLUME_MODE_SET"
+    "pvc*:BASE_PVC_NAME:PVC_BASE_NAME_SET"
+    "base*:VM_BASENAME:BASENAME_SET"
+    "core*:VM_CPU_CORES"
+    "mem*:VM_MEMORY"
+    "requestm*:VM_MEMORY_REQUEST"
+    "requestc*:VM_CPU_REQUEST"
+    "vmsper*:NUM_VMS_PER_NAMESPACE"
+    "vms*:NUM_VMS"
+    "namesp*:NUM_NAMESPACES"
+    "runstrat*:RUN_STRATEGY"
+    "cloudinit:CLOUDINIT_FILE"
+)
+
+# Apply a simple value option from _VSTORM_SIMPLE_OPTS.
+# Args: $1 = normalized option name, $2 = value.
+# Returns 0 if a registry entry matched (and was applied), 1 otherwise.
+_apply_simple_option() {
+    local opt=$1 value=$2 entry pat var setflag
+    for entry in "${_VSTORM_SIMPLE_OPTS[@]}"; do
+	IFS=: read -r pat var setflag <<< "$entry"
+	# shellcheck disable=SC2053  # intentional glob match of $pat
+	if [[ "$opt" == $pat ]]; then
+	    local -n _v=$var
+	    _v=$value
+	    if [[ -n "$setflag" ]]; then
+		local -n _f=$setflag
+		_f=1
+	    fi
+	    return 0
+	fi
+    done
+    return 1
+}
+
 # Process long options.  Handle options names case-insensitive
 # and allow either -, _, or neither in names.
+# Simple value options live in the _VSTORM_SIMPLE_OPTS registry (handled by the
+# default case); options with extra side effects are explicit cases here.
 process_option() {
     local optstr=${1:-}
     local option=
@@ -442,35 +495,19 @@ process_option() {
     option=${option//-/}
     # Convert the option to lowercase for case-insensitive matching
     case "${option,,}" in
-	batchid)   BATCH_ID=$value; BATCH_ID_SET=1 ;;
 	delete)    [[ -n "$value" ]] || fatal "--delete requires a batch ID (e.g. --delete=abc123)"
 		   DELETE_BATCH=$value ;;
 	deleteall) DELETE_ALL=1 ;;
 	yes)       CONFIRM_DELETE=1 ;;
-	datasourc*) DATASOURCE=$value ;;
 	dvurl)     DV_URL=$value; DATASOURCE= ;;
-	storagecl*) STORAGE_CLASS=$value; STORAGE_CLASS_SET=1 ;;
-	storagesi*|storage) STORAGE_SIZE=$value ;;
-	datadisksi*|datadisksize) DATA_DISK_SIZE=$value ;;
-	accessmod*|accessmode) ACCESS_MODE=$value; ACCESS_MODE_SET=1 ;;
-	volumemod*|volumemode) VOLUME_MODE=$value; VOLUME_MODE_SET=1 ;;
 	snapshotcl*) SNAPSHOT_CLASS=$value; SNAPSHOT_CLASS_SET=1; USE_SNAPSHOT=1; SNAPSHOT_EXPLICITLY_SET=1 ;;
 	nosnapshot) USE_SNAPSHOT=0; SNAPSHOT_EXPLICITLY_SET=1 ;;
-	pvc*)      BASE_PVC_NAME=$value; PVC_BASE_NAME_SET=1 ;;
-	base*)	   VM_BASENAME=$value; BASENAME_SET=1 ;;
-	core*)	   VM_CPU_CORES=$value ;;
-	mem*)	   VM_MEMORY=$value ;;
 	firmware)
 	    case "${value,,}" in
 		bios|efi) VM_FIRMWARE=${value,,} ;;
 		*) fatal "Invalid --firmware='$value'; use bios or efi" ;;
 	    esac
 	    ;;
-	requestm*) VM_MEMORY_REQUEST=$value ;;
-	requestc*) VM_CPU_REQUEST=$value ;;
-	vmsper*)   NUM_VMS_PER_NAMESPACE=$value ;;
-	vms*)	   NUM_VMS=$value ;;
-	namesp*)   NUM_NAMESPACES=$value ;;
 	nssequentialcreation) parse_bool_flag NS_SEQUENTIAL_CREATION "$value" "--ns-sequential-creation" ;;
 	udnl2)
 	    UDN_L2=1
@@ -482,11 +519,9 @@ process_option() {
 	service)
 	    parse_service_value "$value"
 	    ;;
-	runstrat*) RUN_STRATEGY=$value ;;
 	wait)	   parse_bool_flag WAIT "$value" "--wait" ;;
 	waitssh)   parse_bool_flag WAIT_SSH "$value" "--wait-ssh"
 		   ((WAIT_SSH)) && WAIT=1 ;;
-	cloudinit) CLOUDINIT_FILE=$value ;;
 	env)
 	    # Keep full KEY=VAL (including KEY= and KEY=a=b). Do not use $value from
 	    # IFS== read — a trailing '=' is dropped (RESULT_SERVER_URL= → RESULT_SERVER_URL).
@@ -500,7 +535,8 @@ process_option() {
 		   DATASOURCE=; DV_URL= ;;
 	createex*) RECREATE_EXISTING_VMS=1 ;;
 	profile)   PROFILE_TARGET=${value:-all} ;;
-	*) 	   fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
+	*) 	   _apply_simple_option "${option,,}" "$value" ||
+		       fatal "Error: unrecognized option '--${optstr%%=*}'. Run '$0 -h' to see all options." ;;
     esac
 }
 
