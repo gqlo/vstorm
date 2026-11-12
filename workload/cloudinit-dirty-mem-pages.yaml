@@ -60,6 +60,8 @@ write_files:
                   *out_bytes = (uint64_t)(mem_total * val);
                   return 0;
               }
+              if (val >= (double)UINT64_MAX)
+                  return -1;
               *out_bytes = (uint64_t)val;
               return 0;
           }
@@ -80,7 +82,10 @@ write_files:
               case 't': multiplier = 1024.0 * 1024.0 * 1024.0 * 1024.0; break;
               default: return -1;
           }
-          *out_bytes = (uint64_t)(val * multiplier);
+          double scaled = val * multiplier;
+          if (!isfinite(scaled) || scaled >= (double)UINT64_MAX)
+              return -1;
+          *out_bytes = (uint64_t)scaled;
           return 0;
       }
       int main(int argc, char **argv) {

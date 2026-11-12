@@ -42,6 +42,8 @@ static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes)
             return 0;
         }
 
+        if (val >= (double)UINT64_MAX)
+            return -1;
         *out_bytes = (uint64_t)val;
         return 0;
     }
@@ -67,7 +69,10 @@ static int parse_input(const char *str, uint64_t mem_total, uint64_t *out_bytes)
         default: return -1;
     }
 
-    *out_bytes = (uint64_t)(val * multiplier);
+    double scaled = val * multiplier;
+    if (!isfinite(scaled) || scaled >= (double)UINT64_MAX)
+        return -1;
+    *out_bytes = (uint64_t)scaled;
     return 0;
 }
 

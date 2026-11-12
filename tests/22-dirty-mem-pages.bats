@@ -45,9 +45,19 @@ _extract_dmp_source() {
 }
 
 # Run the binary with a 1s timeout (it loops forever on valid input) and merge
-# stderr (banner/errors) into $output.
+# stderr (banner/errors) into $output. Used for inputs expected to FAIL fast.
 run_dmp() {
     run timeout 1 "$_DMP_BIN" "$@"
+}
+
+# Run a VALID input and assert the program is still running at the timeout.
+# The parse banner is printed BEFORE mmap, so a banner check alone cannot tell a
+# successful allocation from an mmap failure (which exits 1). A valid run instead
+# loops forever and is killed by `timeout` with status 124 -- asserting that
+# proves parsing AND allocation succeeded and the dirtying loop was entered.
+run_dmp_ok() {
+    run timeout 1 "$_DMP_BIN" "$@"
+    [ "$status" -eq 124 ]
 }
 
 # ---------------------------------------------------------------
@@ -76,7 +86,7 @@ run_dmp() {
 # Valid fractions (0.1-0.9) -> buffer allocated, banner printed
 # ---------------------------------------------------------------
 @test "DMP: fraction 0.5 is accepted and prints banner" {
-    run_dmp 0.5
+    run_dmp_ok 0.5
     [[ "$output" == *"phys_ram="* ]]
     [[ "$output" == *"buffer="* ]]
     [[ "$output" == *"dirty="* ]]
@@ -84,9 +94,9 @@ run_dmp() {
 }
 
 @test "DMP: fraction boundaries 0.1 and 0.9 are accepted" {
-    run_dmp 0.1
+    run_dmp_ok 0.1
     [[ "$output" == *"phys_ram="* ]]
-    run_dmp 0.9
+    run_dmp_ok 0.9
     [[ "$output" == *"phys_ram="* ]]
 }
 
@@ -113,39 +123,39 @@ run_dmp() {
 # (small, MiB-scale values so the 90%-of-RAM cap never trips on CI runners)
 # ---------------------------------------------------------------
 @test "DMP: explicit byte count is accepted" {
-    run_dmp 67108864   # 64 MiB
+    run_dmp_ok 67108864   # 64 MiB
     [[ "$output" == *"buffer=64 MiB"* ]]
 }
 
 @test "DMP: size 64M -> 64 MiB buffer" {
-    run_dmp 64M
+    run_dmp_ok 64M
     [[ "$output" == *"buffer=64 MiB"* ]]
 }
 
 @test "DMP: size 128M -> 128 MiB buffer" {
-    run_dmp 128M
+    run_dmp_ok 128M
     [[ "$output" == *"buffer=128 MiB"* ]]
 }
 
 @test "DMP: size 64MiB (iB suffix) -> 64 MiB buffer" {
-    run_dmp 64MiB
+    run_dmp_ok 64MiB
     [[ "$output" == *"buffer=64 MiB"* ]]
 }
 
 @test "DMP: size 64MB (B suffix) -> 64 MiB buffer" {
-    run_dmp 64MB
+    run_dmp_ok 64MB
     [[ "$output" == *"buffer=64 MiB"* ]]
 }
 
 @test "DMP: K/G/T units are accepted" {
-    run_dmp 65536K   # 64 MiB
+    run_dmp_ok 65536K   # 64 MiB
     [[ "$output" == *"buffer=64 MiB"* ]]
-    run_dmp 1G
+    run_dmp_ok 1G
     [[ "$output" == *"buffer=1024 MiB"* ]]
 }
 
 @test "DMP: decimal size 0.5G... handled via fraction, decimal unit 1.5G is exact" {
-    run_dmp 96M
+    run_dmp_ok 96M
     [[ "$output" == *"buffer=96 MiB"* ]]
 }
 
@@ -153,13 +163,13 @@ run_dmp() {
 # Bare bytes suffix (fix #2): 512B / 100b accepted (sub-page -> clamped, not errored)
 # ---------------------------------------------------------------
 @test "DMP: 512B (bytes suffix) is accepted, not rejected" {
-    run_dmp 512B
+    run_dmp_ok 512B
     [[ "$output" == *"phys_ram="* ]]
     [[ "$output" != *"invalid input string"* ]]
 }
 
 @test "DMP: 100b (lowercase bytes suffix) is accepted" {
-    run_dmp 100b
+    run_dmp_ok 100b
     [[ "$output" == *"phys_ram="* ]]
     [[ "$output" != *"invalid input string"* ]]
 }
@@ -210,6 +220,20 @@ run_dmp() {
 @test "DMP: overflow (1e400 -> ERANGE) is rejected" {
     run_dmp 1e400
     [[ "$output" == *"invalid input string"* ]]
+}
+
+@test "DMP: oversized finite value (1e300) is rejected, not truncated to 0" {
+    # Finite but >= 2^64: must be rejected before the uint64_t cast (no UB,
+    # no silent clamp to a 1-page buffer).
+    run_dmp 1e300
+    [[ "$output" == *"invalid input string"* ]]
+    [[ "$output" != *"phys_ram="* ]]
+}
+
+@test "DMP: oversized value with unit (1e30G) is rejected" {
+    run_dmp 1e30G
+    [[ "$output" == *"invalid input string"* ]]
+    [[ "$output" != *"phys_ram="* ]]
 }
 
 # ---------------------------------------------------------------
