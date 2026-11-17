@@ -46,8 +46,10 @@ download is the slowest and most failure-prone step. See
 [Variant: pre-installed image](#variant-pre-installed-image) below.
 
 If instead you let the workload **install the DB + HammerDB at first boot** (the
-skeleton's default), the image needs **working DNF/Yum (or APT) repositories** and
-**outbound network access** to fetch the HammerDB release.
+skeleton's default), the image needs **working DNF/Yum repositories** and
+**outbound network access** to fetch the HammerDB release. The skeleton targets
+**RHEL-family** guests (`postgresql-server` + `postgresql-setup`); adapt the
+package and init steps for other distros.
 
 **OCP OS images** (DataSources from `openshift-virtualization-os-images`, e.g.
 `rhel9`) are **minimal**: no enabled repos, no DB, no HammerDB. The at-boot path
@@ -151,7 +153,8 @@ write_files:
       diset tpcc pg_pass tpcc
       diset tpcc pg_dbase tpcc
       diset tpcc pg_count_ware $env(HDB_WAREHOUSES)
-      diset tpcc pg_num_vu $env(HDB_VU)
+      # Build users must not exceed the warehouse count.
+      diset tpcc pg_num_vu [expr {min($env(HDB_VU), $env(HDB_WAREHOUSES))}]
       buildschema
       waittocomplete
       quit
@@ -195,11 +198,21 @@ write_files:
 
       echo "Starting HammerDB TPROC-C: db=$HDB_DB warehouses=$HDB_WAREHOUSES vu=$HDB_VU"
 
-      # 1) Initialize and start PostgreSQL, create the tpcc role
-      if [[ ! -d /var/lib/pgsql/data/base ]]; then
+      # 1) Initialize and start PostgreSQL, then set up credentials.
+      # HammerDB connects over TCP (pg_host=localhost) as the superuser WITH a
+      # password, so the postgres role needs a password and pg_hba must allow
+      # password auth on loopback (default RHEL pg_hba uses ident/peer).
+      PGDATA=/var/lib/pgsql/data
+      if [[ ! -d "$PGDATA/base" ]]; then
           postgresql-setup --initdb
       fi
+      if ! grep -qE '^host .* 127\.0\.0\.1/32 .*(md5|scram)' "$PGDATA/pg_hba.conf"; then
+          printf 'host all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n' \
+              >> "$PGDATA/pg_hba.conf"
+      fi
       systemctl enable --now postgresql
+      # pg_superuserpass in build.tcl must match this password.
+      sudo -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
       sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" \
           | grep -q 1 || sudo -u postgres psql -c \
           "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
@@ -263,6 +276,16 @@ Notes:
 - `diset` keys are **DB-specific** (`pg_*` for PostgreSQL, `mysql_*` for MySQL,
   `maria_*` for MariaDB). To target MySQL/MariaDB, swap the package, the init
   steps, and the `diset` keys accordingly.
+- **Harden before production use.** The skeleton relies on `set -euo pipefail` to
+  catch a non-zero `hammerdbcli` exit, but HammerDB can log a failed build/run
+  without failing the process — verify its reported outcome and only start the
+  timed run after the build succeeds. It also rebuilds the schema on every boot;
+  add a completion marker written **only** after a successful build so a reboot
+  does not rebuild or mistake a partial `tpcc` schema for a complete one.
+- **Credentials.** Like the sibling fio/stress-ng profiles, this skeleton sets a
+  default root password and enables root password SSH for lab convenience, and
+  uses fixed `postgres`/`tpcc` DB passwords. Replace these with your own
+  credentials (or SSH keys) for any non-lab environment.
 
 ## Variant: pre-installed image
 
@@ -294,6 +317,8 @@ export HDB_DB="${HDB_DB:-pg}" HDB_WAREHOUSES="${HDB_WAREHOUSES:-4}" \
        HDB_VU="${HDB_VU:-4}" HDB_RAMPUP="${HDB_RAMPUP:-2}" HDB_DURATION="${HDB_DURATION:-5}"
 
 systemctl enable --now postgresql
+# Bake the pg_hba loopback md5 rule into the image; set the superuser password here.
+sudo -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" | grep -q 1 \
   || sudo -u postgres psql -c "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
 
