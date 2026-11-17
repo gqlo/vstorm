@@ -28,15 +28,22 @@ completes on modest VMs. Scale up with `--env` and larger `--cores`/`--memory`.
 
 ## Image requirements and recommendation
 
-The workload **installs the database and HammerDB at first boot** via the guest
-package manager and a download. Use a **customized QCOW** (or DataSource) with
-**working DNF/Yum (or APT) repositories** and outbound network access to fetch the
-HammerDB release — or an image with both preinstalled.
+**Strongly recommended: bake everything into the image.** Pre-install the
+database, HammerDB CLI, and all dependencies (`curl`, build/runtime libs, the
+HammerDB release unpacked under `/opt/HammerDB`) into a **custom QCOW / DataSource**
+so cloud-init only has to *run* the benchmark. This is faster, deterministic, and
+works on **air-gapped** clusters with no outbound network — the first-boot
+download is the slowest and most failure-prone step. See
+[Variant: pre-installed image](#variant-pre-installed-image) below.
+
+If instead you let the workload **install the DB + HammerDB at first boot** (the
+skeleton's default), the image needs **working DNF/Yum (or APT) repositories** and
+**outbound network access** to fetch the HammerDB release.
 
 **OCP OS images** (DataSources from `openshift-virtualization-os-images`, e.g.
-`rhel9`) are **minimal**: no enabled repos, no DB, no HammerDB. The workload will
-fail on them. Prefer a custom DataSource or `--dv-url` (HTTPS, pinned digest) you
-control. See the [fio doc](cloud-init-fio-workload.md#image-requirements-and-recommendation)
+`rhel9`) are **minimal**: no enabled repos, no DB, no HammerDB. The at-boot path
+will fail on them. Prefer a custom DataSource or `--dv-url` (HTTPS, pinned digest)
+you control. See the [fio doc](cloud-init-fio-workload.md#image-requirements-and-recommendation)
 for the full rationale.
 
 Size the root disk for the database: `HDB_WAREHOUSES` × ~100 MB plus the OS. Raise
@@ -237,6 +244,47 @@ Notes:
 - `diset` keys are **DB-specific** (`pg_*` for PostgreSQL, `mysql_*` for MySQL,
   `maria_*` for MariaDB). To target MySQL/MariaDB, swap the package, the init
   steps, and the `diset` keys accordingly.
+
+## Variant: pre-installed image
+
+When the DB, HammerDB, and all dependencies are **already baked into the image**
+(recommended — see [Image requirements](#image-requirements-and-recommendation)),
+drop `packages:` and the install/download logic. Cloud-init then only writes env +
+scripts and starts the service, so no repos or outbound network are required (works
+air-gapped).
+
+Build the image once, e.g. with `virt-customize` on your base QCOW:
+
+```bash
+virt-customize -a base.qcow2 \
+  --install postgresql-server,curl \
+  --run-command 'curl -fsSL -o /tmp/h.tar.gz \
+      https://github.com/TPC-Council/HammerDB/releases/download/v4.12/HammerDB-4.12-Linux.tar.gz \
+    && tar -xzf /tmp/h.tar.gz -C /opt \
+    && ln -sfn /opt/HammerDB-4.12 /opt/HammerDB' \
+  --run-command 'postgresql-setup --initdb'
+```
+
+Then point vstorm at it (`--dv-url` / `--datasource`) and trim the orchestration
+script so it assumes everything is present:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+export HDB_DB="${HDB_DB:-pg}" HDB_WAREHOUSES="${HDB_WAREHOUSES:-4}" \
+       HDB_VU="${HDB_VU:-4}" HDB_RAMPUP="${HDB_RAMPUP:-2}" HDB_DURATION="${HDB_DURATION:-5}"
+
+systemctl enable --now postgresql
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" | grep -q 1 \
+  || sudo -u postgres psql -c "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
+
+cd /opt/HammerDB
+./hammerdbcli auto /opt/hammerdb/build.tcl
+./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
+```
+
+With a pre-installed image you can also drop `curl` from `packages:` entirely and
+leave only the `write_files` + `runcmd` sections in the cloud-init profile.
 
 ## Monitoring
 
