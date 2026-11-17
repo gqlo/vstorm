@@ -1,11 +1,17 @@
 # Cloud-init and HammerDB workload
 
+> **Status: design plan / proposal.** This is a guide for *adding* a HammerDB
+> workload. The `workload/cloudinit-hammerdb-workload.yaml` profile and its
+> result-sync wiring do **not** exist yet — the YAML and shell below are a
+> skeleton to build from, not a shipped, tested workload. The `vstorm` commands
+> throughout assume you have first created that file (see
+> [The cloud-init profile](#the-cloud-init-profile)); they will fail until you do.
+
 Run a [HammerDB](https://www.hammerdb.com/docs6.1/ch01s14.html#d0e755) TPROC-C
-(OLTP) database benchmark inside VMs at boot. This guide shows how to **add** the
-workload as a cloud-init profile — the same pattern used by the
-[fio](cloud-init-fio-workload.md) and [stress-ng](cloud-init-stress-ng-workload.md)
-workloads: a script and systemd unit injected via `write_files`, tuned through
-`vstorm --env`.
+(OLTP) database benchmark inside VMs at boot. This plan follows the same pattern
+as the [fio](cloud-init-fio-workload.md) and
+[stress-ng](cloud-init-stress-ng-workload.md) workloads: a script and systemd unit
+injected via `write_files`, tuned through `vstorm --env`.
 
 Unlike fio/stress-ng, HammerDB needs **a database running in the guest** and the
 **HammerDB CLI** (`hammerdbcli`). The cloud-init profile installs both, builds the
@@ -15,6 +21,9 @@ For VM CPU/memory options (`--cores`, `--memory`, etc.), see the main
 [README](../README.md#options).
 
 ## Quick start: example commands
+
+Once you have created `workload/cloudinit-hammerdb-workload.yaml` from
+[the skeleton below](#the-cloud-init-profile), these are the intended invocations:
 
 | Goal | Command |
 |------|---------|
@@ -60,8 +69,14 @@ Cloud-init installs the DB + HammerDB, writes the build/run Tcl scripts and the
 workload script to `/opt`, and enables `hammerdb-workload.service` (**one-shot**:
 build schema → run benchmark → exit). Pass `HDB_*` once via `vstorm --env`.
 
-If `RESULT_SERVER_URL` is set, the guest can POST a result JSON when the run
-finishes — see [workload result sync and dashboard](workload-result-sync-and-dashboard.md).
+**Result sync is not implemented in this skeleton.** The orchestration script
+below only writes NOPM/TPM to `/root/hammerdb-result.txt` and leaves a TODO where a
+collector POST would go. To push results to the dashboard, you must add a
+`report_result`/heartbeat implementation — mirror
+[`report_result` in workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml)
+and see [workload result sync and dashboard](workload-result-sync-and-dashboard.md).
+The `RESULT_SERVER_URL` / `VSTORM_*` rows below are the *intended* contract for
+that future work, not yet wired up.
 
 ## Tuning: env overrides
 
@@ -75,8 +90,8 @@ Override with `--env KEY=VAL` (repeat as needed):
 | `HDB_RAMPUP` | Ramp-up minutes before measurement (default `2`) |
 | `HDB_DURATION` | Measured run minutes (default `5`) |
 | `HDB_VERSION` | HammerDB release to download (default pinned in the script) |
-| `RESULT_SERVER_URL` | Collector results URL; enables one POST after the run |
-| `VSTORM_BATCH_ID` / `VSTORM_VM_NAME` | Auto-injected by vstorm for result join |
+| `RESULT_SERVER_URL` | *(planned, not implemented)* Collector results URL for a post-run POST |
+| `VSTORM_BATCH_ID` / `VSTORM_VM_NAME` | *(planned)* Auto-injected by vstorm for result join |
 
 ```bash
 # Larger schema and more virtual users
@@ -84,7 +99,7 @@ vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=50 --env HDB_VU=16 \
   --cores=8 --memory=16Gi --vms=5
 
-# Collect results to the dashboard collector
+# Collect results to the dashboard collector (requires adding the POST — see above)
 vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=20 --env HDB_VU=8 \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
@@ -218,6 +233,10 @@ write_files:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
+      # Schema build + rampup + duration far exceed systemd's default 90s
+      # start timeout for a Type=oneshot unit; disable it so the benchmark
+      # is not SIGTERM'd mid-run.
+      TimeoutStartSec=0
       EnvironmentFile=-/etc/default/vstorm-guest-env
       ExecStart=/opt/hammerdb_workload.sh
       Restart=no
