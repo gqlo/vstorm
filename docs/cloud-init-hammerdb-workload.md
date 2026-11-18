@@ -242,11 +242,14 @@ write_files:
       else
           if [[ -f "$BUILD_MARKER" ]]; then
               echo "Schema config changed ($(cat "$BUILD_MARKER") -> $build_sig); rebuilding"
-              # Safe rebuild: drop only the tpcc database so the new warehouse
-              # count takes effect, leaving other databases untouched. (PostgreSQL
-              # shown; use the DB-specific drop for mysql/maria/mssql.)
-              sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
           fi
+          # Drop any existing tpcc before (re)building so a changed config OR a
+          # retry after a failed/partial first build (no marker yet) starts clean
+          # instead of running buildschema against a half-built schema. DROP ...
+          # IF EXISTS is a harmless no-op on a genuine first build, and touches
+          # only tpcc. (PostgreSQL shown; use the DB-specific drop for
+          # mysql/maria/mssql.)
+          sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
           build_log=/root/hammerdb-build.log
           ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee "$build_log"
           if grep -qiE 'error|fatal|could not|failed' "$build_log" \
@@ -396,10 +399,10 @@ build_sig="db=$HDB_DB warehouses=$HDB_WAREHOUSES"
 if [[ -f "$BUILD_MARKER" && "$(cat "$BUILD_MARKER")" == "$build_sig" ]]; then
     echo "Schema already built for [$build_sig]; skipping build"
 else
-    # Changed config: drop only the tpcc database, leaving other data intact.
-    if [[ -f "$BUILD_MARKER" ]]; then
-        sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
-    fi
+    # Drop any existing tpcc before (re)building so a changed config or a retry
+    # after a failed/partial first build starts clean; IF EXISTS is a no-op on a
+    # genuine first build and touches only tpcc.
+    sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
     ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee /root/hammerdb-build.log
     if grep -qiE 'error|fatal|could not|failed' /root/hammerdb-build.log \
         || ! grep -qi 'schema complete' /root/hammerdb-build.log; then
