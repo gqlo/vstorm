@@ -17,7 +17,7 @@
 - [Options](#options)
 - [How it works](#how-it-works)
 - [Development](#development)
-- **Docs:** [logging](docs/logging.md) | [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) | [cloud-init and fio workload](docs/cloud-init-fio-workload.md) | [workload result sync and dashboard](docs/workload-result-sync-and-dashboard.md)
+- **Docs:** [logging](docs/logging.md) | [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) | [cloud-init and fio workload](docs/cloud-init-fio-workload.md) | [cloud-init and HammerDB workload (design plan)](docs/cloud-init-hammerdb-workload.md) | [workload result sync and dashboard](docs/workload-result-sync-and-dashboard.md)
 - **More docs:** [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [WFFC base DV deadlock](docs/wffc-base-dv-deadlock.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md) | [custom build images](custom-build-images/README.md)
 - **Helpers:** [vm-ssh](helpers/vm-ssh) | [vm-export](helpers/vm-export) | [install-virtctl](helpers/install-virtctl)
 
@@ -320,6 +320,7 @@ docs/
   logging.md         # logging, manifests, and logs/ directory structure
   cloud-init-stress-ng-workload.md # cloud-init and stress-ng workload
   cloud-init-fio-workload.md       # cloud-init and fio storage I/O workload
+  cloud-init-hammerdb-workload.md  # cloud-init and HammerDB workload (design plan)
   testing.md         # how tests work, categories, and CI pipeline
 helpers/
   install-virtctl    # download and install virtctl from the cluster
