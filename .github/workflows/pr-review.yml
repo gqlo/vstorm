@@ -212,7 +212,9 @@ jobs:
                   '(Use format: - [x] Item)',
                   '',
                   '## Checklist',
-                  'Mark applicable with [x]: shell safety (quoting/set -u), self-review, 100% corresponding tests for new/changed functions (bats/python/js), CI green, docs/README updated if flags or behavior changed',
+                  'Mark applicable with [x]: shell safety (quoting/set -u), self-review, ' +
+                    '100% corresponding tests for new/changed functions (bats/python/js), ' +
+                    'CI green, docs/README updated if flags or behavior changed',
                   '(Use format: - [x] Item)'
                 ].join('\n');
 
@@ -329,7 +331,7 @@ jobs:
           CLOUD_ML_REGION: ${{ env.CLOUD_ML_REGION }}
         with:
           use_vertex: "true"
-          track_progress: true
+          track_progress: false
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -353,24 +355,52 @@ jobs:
 
             The PR branch is already checked out in the working directory.
 
-            Always report findings — do not stop at inline comments alone.
-            Start the top-level summary with "## 🤖 Claude Code Review" and post it
-            with `gh pr comment`. The summary MUST include:
-            - Brief overall assessment
-            - **Bugs** — incorrect behavior, crashes, data loss, broken CLI/YAML output
-            - **Logic flaws** — wrong control flow, race/ordering, incorrect defaults,
-              dry-run vs live divergence, template/placeholder mistakes
-            - **Issues** — missing 100% corresponding tests, security/shell-safety gaps,
-              docs drift, incomplete error handling
-            For each item: severity (blocker / major / minor), file path, short why it
-            matters, and a concrete fix hint. If none found in a category, write "None".
+            Maintain ONE persistent review comment and update it in place on every
+            push — never post a new review comment per commit. Identify it by the
+            marker `<!-- claude-review-summary -->` as the first line of its body.
 
-            Additionally use `mcp__github_inline_comment__create_inline_comment`
-            (with `confirmed: true`) on the specific lines for real bugs and logic flaws —
-            not style or naming nits. Inline comments complement the summary; every
-            finding still belongs in the summary list.
-            Do not submit a formal APPROVE or REQUEST CHANGES review event.
+            Procedure:
+            1. Read the existing review comment to carry findings forward:
+               `gh pr view ${{ github.event.pull_request.number }} --json comments`
+               Find the comment whose body begins with the marker above (that is your
+               previous review). If none exists yet, start fresh.
+            2. Re-check EVERY finding already listed in that comment against the current
+               checked-out code and update its Status: ✅ Fixed, ⚠️ Open, or 🔄 Partial.
+               Keep previously-resolved rows (do not drop history) so status is auditable.
+            3. Add rows for any new findings in the latest changes.
+            4. Write the full comment body to /tmp/review.md, then publish it as a
+               single, in-place-updated comment with:
+                 gh pr comment ${{ github.event.pull_request.number }} \
+                   --edit-last --create-if-none --body-file /tmp/review.md
+               (`--edit-last` edits your prior review comment; `--create-if-none` posts
+               it the first time. This comment is the bot's only comment, so --edit-last
+               always targets it.)
+
+            Comment body format (exact):
+            - Line 1 must be exactly: `<!-- claude-review-summary -->`
+            - Then: `## 🤖 Claude Code Review`
+            - One line: a brief overall assessment, then `_Updated for commit <short-sha>._`
+            - A findings table with these columns:
+
+              | Status | Severity | Category | Location | Finding & fix |
+              |--------|----------|----------|----------|---------------|
+
+              Status = ✅ Fixed / ⚠️ Open / 🔄 Partial. Severity = blocker / major /
+              minor. Category = Bug / Logic / Issue, where:
+              - Bug = incorrect behavior, crashes, data loss, broken CLI/YAML output
+              - Logic = wrong control flow, race/ordering, incorrect defaults, dry-run
+                vs live divergence, template/placeholder mistakes
+              - Issue = missing 100% corresponding tests (see AGENTS.md), shell-safety /
+                security gaps, docs drift, incomplete error handling
+              Location = `path:line`. Finding & fix = short description plus a concrete
+              fix hint (keep each cell to one line).
+            - Below the table: `**Open:** N` followed by a one-line list of only the
+              still-open items, or `All findings resolved ✅` when none remain open.
+            - If there are no findings at all, say so in place of the table.
+
+            Keep everything in this ONE comment: do NOT post inline line comments, and
+            do NOT submit a formal APPROVE or REQUEST CHANGES review event.
           claude_args: |
             --model ${{ env.VERTEX_MODEL }}
             --max-turns 35
-            --allowedTools "Read,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment"
+            --allowedTools "Read,Write,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
