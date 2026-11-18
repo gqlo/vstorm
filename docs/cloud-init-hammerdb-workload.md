@@ -86,7 +86,7 @@ Override with `--env KEY=VAL` (repeat as needed):
 
 | Parameter | Description |
 |-----------|-------------|
-| `HDB_DB` | HammerDB database target (default `pg` for PostgreSQL; e.g. `mysql`, `maria`) |
+| `HDB_DB` | HammerDB database target (default `pg` for PostgreSQL; e.g. `mysql`, `maria`, `mssql`) |
 | `HDB_WAREHOUSES` | TPROC-C schema size in warehouses (default `4`) |
 | `HDB_VU` | Virtual users (benchmark clients; default `4`) |
 | `HDB_RAMPUP` | Ramp-up minutes before measurement (default `2`) |
@@ -227,8 +227,27 @@ write_files:
       fi
       cd /opt/HammerDB
 
-      # 3) Build the schema once, then run the timed benchmark
-      ./hammerdbcli auto /opt/hammerdb/build.tcl
+      # 3) Build the schema once, then run the timed benchmark.
+      #    hammerdbcli can exit 0 even when the build logged an error, so capture
+      #    the build output and require a completion line (and no error lines)
+      #    before trusting it. A sentinel makes a reboot skip an already-built
+      #    schema instead of rebuilding it or running against a half-built one.
+      #    The completion/error patterns are HammerDB-version-specific — validate
+      #    them against your release.
+      BUILD_MARKER=/var/lib/vstorm-hammerdb-build.done
+      if [[ ! -f "$BUILD_MARKER" ]]; then
+          build_log=/root/hammerdb-build.log
+          ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee "$build_log"
+          if grep -qiE 'error|fatal|could not|failed' "$build_log" \
+              || ! grep -qi 'schema complete' "$build_log"; then
+              echo "HammerDB build did not complete cleanly; not running benchmark" >&2
+              exit 1
+          fi
+          touch "$BUILD_MARKER"
+      else
+          echo "Schema already built ($BUILD_MARKER present); skipping build"
+      fi
+
       ./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
 
       echo "HammerDB run finished."
@@ -276,12 +295,14 @@ Notes:
 - `diset` keys are **DB-specific** (`pg_*` for PostgreSQL, `mysql_*` for MySQL,
   `maria_*` for MariaDB). To target MySQL/MariaDB, swap the package, the init
   steps, and the `diset` keys accordingly.
-- **Harden before production use.** The skeleton relies on `set -euo pipefail` to
-  catch a non-zero `hammerdbcli` exit, but HammerDB can log a failed build/run
-  without failing the process — verify its reported outcome and only start the
-  timed run after the build succeeds. It also rebuilds the schema on every boot;
-  add a completion marker written **only** after a successful build so a reboot
-  does not rebuild or mistake a partial `tpcc` schema for a complete one.
+- **Build robustness.** `set -euo pipefail` only catches a non-zero `hammerdbcli`
+  exit, but HammerDB can log a failed build/run while the process exits 0. The
+  orchestration script therefore captures the build log, aborts before the timed
+  run unless the log shows completion with no error lines, and writes a
+  `/var/lib/vstorm-hammerdb-build.done` sentinel so a reboot skips an
+  already-built schema instead of rebuilding it or running against a half-built
+  one. The completion/error grep patterns are **HammerDB-version-specific** —
+  validate them against your release before relying on them.
 - **Credentials.** Like the sibling fio/stress-ng profiles, this skeleton sets a
   default root password and enables root password SSH for lab convenience, and
   uses fixed `postgres`/`tpcc` DB passwords. Replace these with your own
@@ -295,17 +316,45 @@ drop `packages:` and the install/download logic. Cloud-init then only writes env
 scripts and starts the service, so no repos or outbound network are required (works
 air-gapped).
 
-Build the image once, e.g. with `virt-customize` on your base QCOW:
+Build the image once with whatever image-build tool you use (virt-manager,
+`guestfish`, Packer, a Containerfile, or a manual install in a running VM you then
+snapshot). Whatever the tool, the image needs the DB + HammerDB in place, plus the
+**shared boot-timestamp agent** so the cloud-init profile no longer has to embed
+the ~100-line script under `write_files`. The files to bake in:
 
-```bash
-virt-customize -a base.qcow2 \
-  --install postgresql-server,curl \
-  --run-command 'curl -fsSL -o /tmp/h.tar.gz \
-      https://github.com/TPC-Council/HammerDB/releases/download/v4.12/HammerDB-4.12-Linux.tar.gz \
-    && tar -xzf /tmp/h.tar.gz -C /opt \
-    && ln -sfn /opt/HammerDB-4.12 /opt/HammerDB' \
-  --run-command 'postgresql-setup --initdb'
+| Path in image | Permissions | Source |
+|---------------|-------------|--------|
+| `/opt/HammerDB` (→ `HammerDB-<ver>`) | — | HammerDB release, unpacked |
+| DB packages initialized (e.g. `postgresql-setup --initdb`) | — | distro package + init |
+| `/opt/vstorm-boot-timestamp.sh` | `0755` | copy of `workload/vstorm-boot-timestamp.sh` |
+| `/etc/systemd/system/vstorm-boot-timestamp.service` | `0644` | copy of that unit |
+
+**Boot-timestamp agent: baked in, not embedded.** `workload/vstorm-boot-timestamp.sh`
+stays the single source of truth; with a pre-installed image it is delivered by
+the image build instead of copy-pasted into every profile's `write_files`
+(which `tests/15-boot-timestamp.bats` otherwise has to keep byte-for-byte
+identical). This shrinks the cloud-init profile and strengthens the
+self-contained / air-gapped property, at the cost of **tying the profile to a
+custom image**: a stock image without the script would otherwise fail at
+`systemctl enable`. Guard the `runcmd` so it degrades gracefully instead —
+heartbeat on a baked image, workload still runs (no heartbeat) on a stock one:
+
+```yaml
+runcmd:
+  - |
+    if [ -x /opt/vstorm-boot-timestamp.sh ]; then
+      systemctl enable --now vstorm-boot-timestamp.service
+    else
+      echo "vstorm-boot-timestamp.sh not in image; skipping boot heartbeat" >&2
+    fi
 ```
+
+Two caveats to carry into the build: the image's copy of the script can drift
+from what the collector/dashboard expect (there is no runtime parity check once
+it is baked in — version the image), and this baked-in approach suits workloads
+that already mandate a custom image (HammerDB does); keep the `write_files` embed
+for the portable `default`/`fio`/`stress-ng` profiles that must run on generic
+images.
 
 Then point vstorm at it (`--dv-url` / `--datasource`) and trim the orchestration
 script so it assumes everything is present:
@@ -323,7 +372,18 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" | grep -
   || sudo -u postgres psql -c "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
 
 cd /opt/HammerDB
-./hammerdbcli auto /opt/hammerdb/build.tcl
+# Same guarded build as the full script: build once behind a sentinel and only
+# run the benchmark if the build log reports completion with no errors.
+BUILD_MARKER=/var/lib/vstorm-hammerdb-build.done
+if [[ ! -f "$BUILD_MARKER" ]]; then
+    ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee /root/hammerdb-build.log
+    if grep -qiE 'error|fatal|could not|failed' /root/hammerdb-build.log \
+        || ! grep -qi 'schema complete' /root/hammerdb-build.log; then
+        echo "HammerDB build did not complete cleanly; not running benchmark" >&2
+        exit 1
+    fi
+    touch "$BUILD_MARKER"
+fi
 ./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
 ```
 
