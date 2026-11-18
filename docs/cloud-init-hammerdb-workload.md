@@ -390,6 +390,57 @@ fi
 With a pre-installed image you can also drop `curl` from `packages:` entirely and
 leave only the `write_files` + `runcmd` sections in the cloud-init profile.
 
+### Alternatives to baking: ConfigMap or runtime injection
+
+Baking the boot-timestamp agent into the image removes the `write_files` embed but
+**ties the profile to a custom image**. Two alternatives keep
+`workload/vstorm-boot-timestamp.sh` as the single source of truth *without*
+requiring a custom image, so the portable `default`/`fio`/`stress-ng` profiles can
+drop the embed too. Both are design options — neither is implemented yet.
+
+**Option 1 — ConfigMap disk.** vstorm creates a ConfigMap (one per namespace, the
+same way it already creates the cloud-init Secret) whose data is the script read
+from `workload/vstorm-boot-timestamp.sh`, and the VM mounts it. KubeVirt surfaces a
+ConfigMap as an **iso9660 disk**, not a guest file, so the guest still has to mount
+it — the ~100-line embed shrinks to a mount+install step:
+
+```yaml
+# VM spec: expose the ConfigMap as a disk (serial lets the guest find it)
+volumes:
+  - name: vstorm-agent
+    configMap:
+      name: vstorm-agent
+# ...matching domain.devices.disks entry with serial: vstorm-agent
+```
+
+```yaml
+# cloud-init runcmd: mount the disk, install the script, start the service
+runcmd:
+  - mkdir -p /mnt/vstorm-agent
+  - mount -o ro /dev/disk/by-id/*vstorm-agent* /mnt/vstorm-agent
+  - install -m 0755 /mnt/vstorm-agent/vstorm-boot-timestamp.sh /opt/
+  - systemctl enable --now vstorm-boot-timestamp.service
+```
+
+Trade-offs: no custom image and no outbound network (works air-gapped), and the
+script lives as an inspectable cluster object; but it needs **new vstorm plumbing**
+(create/manage the ConfigMap per namespace), adds **a disk to every VM**, and the
+guest must mount it (the `by-id`/serial device path is KubeVirt-version-dependent —
+confirm it against your release).
+
+**Option 2 — runtime injection into the existing Secret (simplest).** vstorm
+already base64-encodes the userdata into the cloud-init Secret and substitutes
+`{VSTORM_GUEST_ENV}` before encoding. Add one more placeholder handled the same
+way — e.g. `{VSTORM_BOOT_TIMESTAMP_SH}` alone on an indented line — and have vstorm
+fill it from `workload/vstorm-boot-timestamp.sh` at run time (reusing the existing
+indent/substitution machinery). This removes the embed and the parity test with the
+**smallest** change: no ConfigMap, no extra disk, no guest mount, same single
+delivery channel, works on any image and air-gapped.
+
+Recommendation: use the **ConfigMap** when you want the agent to exist as a
+standalone cluster object; use **runtime injection** when the goal is simply to
+kill the duplication with the fewest moving parts.
+
 ## Monitoring
 
 From the host, use **helpers/log-vm** (uses `virtctl ssh`; set
