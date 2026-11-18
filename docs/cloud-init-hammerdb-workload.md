@@ -227,15 +227,26 @@ write_files:
       fi
       cd /opt/HammerDB
 
-      # 3) Build the schema once, then run the timed benchmark.
+      # 3) Build the schema once per configuration, then run the timed benchmark.
       #    hammerdbcli can exit 0 even when the build logged an error, so capture
       #    the build output and require a completion line (and no error lines)
-      #    before trusting it. A sentinel makes a reboot skip an already-built
-      #    schema instead of rebuilding it or running against a half-built one.
+      #    before trusting it. The sentinel records the schema configuration so a
+      #    reboot skips the build only when it still matches; a changed
+      #    HDB_WAREHOUSES (or HDB_DB) rebuilds instead of running a stale schema.
       #    The completion/error patterns are HammerDB-version-specific — validate
       #    them against your release.
       BUILD_MARKER=/var/lib/vstorm-hammerdb-build.done
-      if [[ ! -f "$BUILD_MARKER" ]]; then
+      build_sig="db=$HDB_DB warehouses=$HDB_WAREHOUSES"
+      if [[ -f "$BUILD_MARKER" && "$(cat "$BUILD_MARKER")" == "$build_sig" ]]; then
+          echo "Schema already built for [$build_sig]; skipping build"
+      else
+          if [[ -f "$BUILD_MARKER" ]]; then
+              echo "Schema config changed ($(cat "$BUILD_MARKER") -> $build_sig); rebuilding"
+              # Safe rebuild: drop only the tpcc database so the new warehouse
+              # count takes effect, leaving other databases untouched. (PostgreSQL
+              # shown; use the DB-specific drop for mysql/maria/mssql.)
+              sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
+          fi
           build_log=/root/hammerdb-build.log
           ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee "$build_log"
           if grep -qiE 'error|fatal|could not|failed' "$build_log" \
@@ -243,9 +254,7 @@ write_files:
               echo "HammerDB build did not complete cleanly; not running benchmark" >&2
               exit 1
           fi
-          touch "$BUILD_MARKER"
-      else
-          echo "Schema already built ($BUILD_MARKER present); skipping build"
+          printf '%s\n' "$build_sig" > "$BUILD_MARKER"
       fi
 
       ./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
@@ -336,17 +345,24 @@ the image build instead of copy-pasted into every profile's `write_files`
 identical). This shrinks the cloud-init profile and strengthens the
 self-contained / air-gapped property, at the cost of **tying the profile to a
 custom image**: a stock image without the script would otherwise fail at
-`systemctl enable`. Guard the `runcmd` so it degrades gracefully instead —
-heartbeat on a baked image, workload still runs (no heartbeat) on a stock one:
+`systemctl enable`. Keep the **full** `runcmd` (SSH setup, `daemon-reload`, and the
+`hammerdb-workload.service` enable) and only guard the boot-timestamp entry so it
+degrades gracefully — heartbeat on a baked image, workload still runs (no
+heartbeat) on a stock one:
 
 ```yaml
 runcmd:
+  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd 2>/dev/null || systemctl restart ssh
+  - ["systemctl", "daemon-reload"]
   - |
     if [ -x /opt/vstorm-boot-timestamp.sh ]; then
       systemctl enable --now vstorm-boot-timestamp.service
     else
       echo "vstorm-boot-timestamp.sh not in image; skipping boot heartbeat" >&2
     fi
+  - ["systemctl", "enable", "--now", "hammerdb-workload.service"]
 ```
 
 Two caveats to carry into the build: the image's copy of the script can drift
@@ -372,17 +388,25 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" | grep -
   || sudo -u postgres psql -c "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
 
 cd /opt/HammerDB
-# Same guarded build as the full script: build once behind a sentinel and only
-# run the benchmark if the build log reports completion with no errors.
+# Same guarded build as the full script: build once per configuration behind a
+# sentinel, rebuild when HDB_WAREHOUSES/HDB_DB change, and only run the benchmark
+# if the build log reports completion with no errors.
 BUILD_MARKER=/var/lib/vstorm-hammerdb-build.done
-if [[ ! -f "$BUILD_MARKER" ]]; then
+build_sig="db=$HDB_DB warehouses=$HDB_WAREHOUSES"
+if [[ -f "$BUILD_MARKER" && "$(cat "$BUILD_MARKER")" == "$build_sig" ]]; then
+    echo "Schema already built for [$build_sig]; skipping build"
+else
+    # Changed config: drop only the tpcc database, leaving other data intact.
+    if [[ -f "$BUILD_MARKER" ]]; then
+        sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
+    fi
     ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee /root/hammerdb-build.log
     if grep -qiE 'error|fatal|could not|failed' /root/hammerdb-build.log \
         || ! grep -qi 'schema complete' /root/hammerdb-build.log; then
         echo "HammerDB build did not complete cleanly; not running benchmark" >&2
         exit 1
     fi
-    touch "$BUILD_MARKER"
+    printf '%s\n' "$build_sig" > "$BUILD_MARKER"
 fi
 ./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
 ```
