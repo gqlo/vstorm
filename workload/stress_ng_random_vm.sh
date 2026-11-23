@@ -1,0 +1,125 @@
+#!/bin/bash
+# Unified stress-ng workload: set WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced (default: memory-heavy).
+# Override via env: CPU_ACTIVE_PROBABILITY, MEM_ACTIVE_PROBABILITY (default 50% each), CPU_PERCENT_MIN/MAX, MEM_PERCENT_MIN/MAX, STRESS_TOGETHER, DURATION_MIN/MAX.
+# Set STRESS_NG_CUSTOM_OPTS to use a custom stress-ng command on active cycles (all tunables still apply; vars like duration, mem_to_use, MEM_WORKERS, CPU_CORES, cpu_load are available).
+# Use /etc/default/stress-workload or systemd Environment= to customize.
+
+# Install stress-ng if not already present
+if ! command -v stress-ng &> /dev/null; then
+    echo "stress-ng not found, installing..."
+    if command -v dnf &> /dev/null; then
+        dnf install -y epel-release 2>/dev/null || true
+        dnf install -y stress-ng
+    elif command -v yum &> /dev/null; then
+        yum install -y epel-release 2>/dev/null || true
+        yum install -y stress-ng
+    elif command -v apt-get &> /dev/null; then
+        apt-get update && apt-get install -y stress-ng
+    else
+        echo "Error: no supported package manager found."
+        exit 1
+    fi
+    if ! command -v stress-ng &> /dev/null; then
+        echo "Error: failed to install stress-ng."
+        exit 1
+    fi
+fi
+
+# Function to generate a random number between min and max
+random_range() {
+    local min=$1
+    local max=$2
+    echo $(( min + RANDOM % (max - min + 1) ))
+}
+
+# WORKLOAD_TYPE preset (env overrides below)
+WORKLOAD_TYPE="${WORKLOAD_TYPE:-memory-heavy}"
+case "$WORKLOAD_TYPE" in
+    memory-heavy) _cpu_min=10;  _cpu_max=50;  _mem_min=80; _mem_max=95; _together=false ;;
+    cpu-heavy)    _cpu_min=50;  _cpu_max=100; _mem_min=20; _mem_max=80; _together=false ;;
+    balanced)     _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _together=false ;;
+    *)            _cpu_min=30;  _cpu_max=70;  _mem_min=40; _mem_max=70; _together=false ;;
+esac
+
+# Tunables (env overrides preset)
+DURATION_MIN="${DURATION_MIN:-5}"
+DURATION_MAX="${DURATION_MAX:-600}"
+CPU_ACTIVE_PROBABILITY="${CPU_ACTIVE_PROBABILITY:-50}"
+MEM_ACTIVE_PROBABILITY="${MEM_ACTIVE_PROBABILITY:-50}"
+CPU_PERCENT_MIN="${CPU_PERCENT_MIN:-$_cpu_min}"
+CPU_PERCENT_MAX="${CPU_PERCENT_MAX:-$_cpu_max}"
+MEM_PERCENT_MIN="${MEM_PERCENT_MIN:-$_mem_min}"
+MEM_PERCENT_MAX="${MEM_PERCENT_MAX:-$_mem_max}"
+CPU_CORES=$(nproc)
+MEM_WORKERS=1
+
+# STRESS_TOGETHER: true/1/yes = one process; false/0/separate = two processes
+STRESS_TOGETHER="${STRESS_TOGETHER:-$_together}"
+[[ "$STRESS_TOGETHER" =~ ^(true|1|yes)$ ]] && STRESS_TOGETHER=true || STRESS_TOGETHER=false
+
+# Memory percentage range (cap at 95 for safety); drawn per cycle
+_mem_max_cap=$MEM_PERCENT_MAX
+(( _mem_max_cap > 95 )) && _mem_max_cap=95
+TOTAL_MEM=$(free -m | awk '/^Mem:/{print $2}')
+
+echo "Starting workload simulation (WORKLOAD_TYPE=$WORKLOAD_TYPE, running forever)"
+echo "CPU_ACTIVE_PROBABILITY=$CPU_ACTIVE_PROBABILITY% | MEM_ACTIVE_PROBABILITY=$MEM_ACTIVE_PROBABILITY% | STRESS_TOGETHER=$STRESS_TOGETHER"
+echo "Using $CPU_CORES CPU cores, CPU ${CPU_PERCENT_MIN}%-${CPU_PERCENT_MAX}%"
+echo "Memory: range ${MEM_PERCENT_MIN}-${MEM_PERCENT_MAX}% per cycle"
+[[ -n "${STRESS_NG_CUSTOM_OPTS:-}" ]] && echo "STRESS_NG_CUSTOM_OPTS is set: using CUSTOM-OPTS branch for active cycles (all tunables apply)."
+echo ""
+
+# Run forever
+cycle=1
+while true; do
+    # Generate random parameters for this cycle
+    duration=$(random_range $DURATION_MIN $DURATION_MAX)
+    cpu_load=$(random_range $CPU_PERCENT_MIN $CPU_PERCENT_MAX)
+    mem_percent=$(random_range $MEM_PERCENT_MIN $_mem_max_cap)
+    mem_to_use=$(( TOTAL_MEM * mem_percent / 100 ))
+
+    # Independent rolls: run CPU and/or memory this cycle (allows CPU and memory out of sync)
+    cpu_roll=$(random_range 1 100)
+    mem_roll=$(random_range 1 100)
+    run_cpu=false
+    run_mem=false
+    [ "$cpu_roll" -le "$CPU_ACTIVE_PROBABILITY" ] && run_cpu=true
+    [ "$mem_roll" -le "$MEM_ACTIVE_PROBABILITY" ] && run_mem=true
+
+    if ! $run_cpu && ! $run_mem; then
+        echo "Cycle $cycle: IDLE - Sleeping for $duration seconds..."
+        sleep $duration
+    elif [[ -n "${STRESS_NG_CUSTOM_OPTS:-}" ]]; then
+        # Tunables (lines 62-74) set DURATION_*, CPU/MEM_*_PROBABILITY, CPU/MEM_PERCENT_*, etc.
+        # Per-cycle vars (lines 91-95) set duration, cpu_load, mem_to_use from those. Same shell here, so
+        # STRESS_NG_CUSTOM_OPTS can use $duration, $mem_to_use, $cpu_load, $MEM_WORKERS, $CPU_CORES, etc.
+        echo "Cycle $cycle: CUSTOM-OPTS - Running stress-ng for $duration seconds..."
+        stress-ng $STRESS_NG_CUSTOM_OPTS --timeout ${duration}s > /dev/null 2>&1
+    elif $run_cpu && ! $run_mem; then
+        echo "Cycle $cycle: CPU only - Running CPU stress for $duration seconds..."
+        echo "  - CPU: $cpu_load%"
+        stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration}s > /dev/null 2>&1
+    elif ! $run_cpu && $run_mem; then
+        echo "Cycle $cycle: MEM only - Running memory stress for $duration seconds..."
+        echo "  - Memory: $mem_to_use MB ($mem_percent%)"
+        stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration}s > /dev/null 2>&1
+    else
+        # Both CPU and memory this cycle
+        if $STRESS_TOGETHER; then
+            echo "Cycle $cycle: ACTIVE (together) - Running stress test for $duration seconds..."
+            echo "  - CPU: $cpu_load%"
+            echo "  - Memory: $mem_to_use MB ($mem_percent%)"
+            stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration}s > /dev/null 2>&1
+        else
+            duration_cpu=$(random_range $DURATION_MIN $DURATION_MAX)
+            duration_mem=$(random_range $DURATION_MIN $DURATION_MAX)
+            echo "Cycle $cycle: ACTIVE (separate) - CPU ${duration_cpu}s, Memory ${duration_mem}s"
+            echo "  - CPU: $cpu_load%"
+            echo "  - Memory: $mem_to_use MB ($mem_percent%)"
+            stress-ng --cpu $CPU_CORES --cpu-load $cpu_load --timeout ${duration_cpu}s > /dev/null 2>&1 &
+            stress-ng --vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0 --timeout ${duration_mem}s > /dev/null 2>&1
+            wait
+        fi
+    fi
+    ((cycle++))
+done

@@ -1,0 +1,15 @@
+[Unit]
+Description=Dirty anonymous pages at a steady rate (fraction of RAM, byte count, or size; see dirty-mem-pages.c)
+After=network.target vstorm-boot-timestamp.service
+Wants=vstorm-boot-timestamp.service
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/vstorm-guest-env
+Environment=DIRTY_RATE_FRACTION=0.5
+ExecStart=/usr/local/bin/dirty-mem-pages $DIRTY_RATE_FRACTION
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target

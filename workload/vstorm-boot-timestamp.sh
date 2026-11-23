@@ -2,9 +2,10 @@
 # Shared guest boot timestamp: append /root/timestamp.txt and optionally POST a
 # heartbeat with boot_timestamp when RESULT_SERVER_URL + VSTORM_BATCH_ID are set.
 #
-# Single source of truth for the guest boot agent. Cloud-init profiles embed a
-# copy under write_files (path /opt/vstorm-boot-timestamp.sh); keep those embeds
-# identical (tests/15-boot-timestamp.bats checks byte-for-byte parity).
+# Single source of truth for the guest boot agent. Cloud-init profiles carry a
+# placeholder under write_files (path /opt/vstorm-boot-timestamp.sh); vstorm
+# splices this file in at runtime (tests/15-boot-timestamp.bats checks the
+# placeholder is present and the spliced output matches this file).
 set -euo pipefail
 
 BOOT_TIMESTAMP_FILE="${RESULT_TIMESTAMP_FILE:-/root/timestamp.txt}"

@@ -331,7 +331,13 @@ workload/
   cloudinit-stress-ng-workload.yaml  # unified stress-ng workload (WORKLOAD_TYPE, env overrides)
   cloudinit-fio-workload.yaml        # fio storage I/O workload (WORKLOAD_TYPE, env overrides)
   cloudinit-dirty-mem-pages.yaml     # compile to dirty-mem-pages; --env DIRTY_RATE_FRACTION=0.1-0.9 | bytes | size (e.g. 2G)
-  dirty-mem-pages.c                  # source for dirty-mem workload (embedded in cloud-init YAML)
+  # Standalone payloads/units (source of truth) spliced into the profiles at
+  # runtime via {PLACEHOLDER}s (see vstorm cloud-init handling):
+  stress_ng_random_vm.sh             # stress-ng workload script
+  fio_workload.sh                    # fio workload script
+  dirty-mem-pages.c                  # source for dirty-mem workload
+  vstorm-boot-timestamp.sh           # shared boot-timestamp agent
+  *.service                          # systemd units for the above
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)
 templates/

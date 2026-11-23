@@ -1,0 +1,14 @@
+[Unit]
+Description=Record guest boot timestamp and optional collector heartbeat
+After=network-online.target network.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/vstorm-guest-env
+ExecStart=/opt/vstorm-boot-timestamp.sh
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

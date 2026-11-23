@@ -393,8 +393,8 @@ write_files:
 This keeps the inline script blobs out of the profile with the **smallest** change:
 one delivery channel (the Secret), no extra disk, no guest mount, works on any image
 and air-gapped. Capacity is not a concern — a Secret holds up to **1 MiB**, and the
-largest current profile (`cloudinit-fio-workload.yaml`, fully embedded) uses only
-~3.7% of that; the HammerDB scripts are smaller.
+largest current profile (`cloudinit-fio-workload.yaml`, with its workload script
+spliced in) uses only ~3.7% of that; the HammerDB scripts are smaller.
 
 **Why not a ConfigMap.** A ConfigMap would make a script a standalone cluster
 object, but it is a poor fit here: KubeVirt surfaces a ConfigMap as a read-only

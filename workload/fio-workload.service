@@ -1,0 +1,15 @@
+[Unit]
+Description=fio storage I/O workload (one-shot)
+After=network-online.target network.target vstorm-boot-timestamp.service
+Wants=network-online.target vstorm-boot-timestamp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/vstorm-guest-env
+EnvironmentFile=-/etc/default/fio-workload
+ExecStart=/opt/fio_workload.sh
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

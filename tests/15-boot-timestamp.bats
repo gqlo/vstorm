@@ -9,6 +9,7 @@
 load 'helpers'
 
 SCRIPT="workload/vstorm-boot-timestamp.sh"
+SERVICE="workload/vstorm-boot-timestamp.service"
 VSTORM="${VSTORM:-./vstorm}"
 
 setup() {
@@ -29,11 +30,13 @@ teardown() {
 
 _extract_embedded_boot_script() {
     local yaml=$1
-    python3 - "$yaml" <<'PY'
+    local marker=${2:-path: /opt/vstorm-boot-timestamp.sh}
+    python3 - "$yaml" "$marker" <<'PY'
 import sys
 from pathlib import Path
 text = Path(sys.argv[1]).read_text().splitlines()
-i = next(i for i, l in enumerate(text) if "path: /opt/vstorm-boot-timestamp.sh" in l)
+marker = sys.argv[2]
+i = next(i for i, l in enumerate(text) if marker in l)
 j = next(j for j in range(i, i + 5) if text[j].rstrip().endswith("content: |"))
 body = []
 for k in range(j + 1, len(text)):
@@ -200,18 +203,52 @@ PY
 }
 
 # ---------------------------------------------------------------
-# boot-ts: embed parity with standalone source of truth
+# boot-ts: placeholder + runtime splice from standalone source of truth
 # ---------------------------------------------------------------
-@test "boot-ts: embedded in all workload cloud-inits matches standalone script" {
-    local src emb y
-    src=$(cat "$SCRIPT")
+@test "boot-ts: all workload cloud-inits carry the boot script/service placeholders, not embedded copies" {
+    local y
     for y in workload/cloudinit-fio-workload.yaml \
              workload/cloudinit-stress-ng-workload.yaml \
              workload/cloudinit-dirty-mem-pages.yaml \
              workload/cloudinit-default.yaml; do
         grep -q 'path: /opt/vstorm-boot-timestamp.sh' "$y"
-        grep -q 'vstorm-boot-timestamp.service' "$y"
-        emb=$(_extract_embedded_boot_script "$y")
-        [[ "$emb" == "$src" ]]
+        grep -q 'path: /etc/systemd/system/vstorm-boot-timestamp.service' "$y"
+        # Placeholders present (each alone on its line); bodies no longer embedded.
+        grep -qE '^[[:space:]]*\{VSTORM_BOOT_SCRIPT\}[[:space:]]*$' "$y"
+        grep -qE '^[[:space:]]*\{VSTORM_BOOT_SERVICE\}[[:space:]]*$' "$y"
+        # Distinctive lines now live only in the standalone script/unit files.
+        ! grep -q 'Boot heartbeat posted' "$y"
+        ! grep -q 'ExecStart=/opt/vstorm-boot-timestamp.sh' "$y"
     done
+}
+
+@test "boot-ts: vstorm splices the standalone script into cloud-init userdata byte-for-byte" {
+    local out b64 decoded emb src
+    src=$(cat "$SCRIPT")
+    out=$(bash "$VSTORM" -n --batch-id=bootsp1 --datasource=rhel9 --vms=1 \
+        --namespaces=1 --cloudinit=workload/cloudinit-default.yaml 2>/dev/null)
+    b64=$(echo "$out" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+    [ -n "$b64" ]
+    decoded=$(echo "$b64" | base64 -d 2>/dev/null)
+    # Placeholder line is fully replaced (only the self-describing comment remains).
+    [[ "$decoded" != *$'\n      {VSTORM_BOOT_SCRIPT}\n'* ]]
+    # Spliced body equals the standalone source of truth.
+    printf '%s\n' "$decoded" > "$_BT_DIR/decoded.yaml"
+    emb=$(_extract_embedded_boot_script "$_BT_DIR/decoded.yaml")
+    [[ "$emb" == "$src" ]]
+}
+
+@test "boot-ts: vstorm splices the standalone systemd unit into cloud-init userdata byte-for-byte" {
+    local out b64 decoded emb src
+    src=$(cat "$SERVICE")
+    out=$(bash "$VSTORM" -n --batch-id=bootsv1 --datasource=rhel9 --vms=1 \
+        --namespaces=1 --cloudinit=workload/cloudinit-default.yaml 2>/dev/null)
+    b64=$(echo "$out" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+    [ -n "$b64" ]
+    decoded=$(echo "$b64" | base64 -d 2>/dev/null)
+    [[ "$decoded" != *"{VSTORM_BOOT_SERVICE}"* ]]
+    printf '%s\n' "$decoded" > "$_BT_DIR/decoded.yaml"
+    emb=$(_extract_embedded_boot_script "$_BT_DIR/decoded.yaml" \
+        "path: /etc/systemd/system/vstorm-boot-timestamp.service")
+    [[ "$emb" == "$src" ]]
 }

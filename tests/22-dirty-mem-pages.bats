@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
-# Extract the embedded dirty-mem-pages.c from cloud-init YAML, compile it, and test
-# the argument parser (fractions, byte counts, human-readable sizes) and guards.
-# The YAML is the source of truth; we extract and compile at test time.
+# Compile the dirty-mem-pages C source and test the argument parser (fractions,
+# byte counts, human-readable sizes) and guards. The standalone
+# workload/dirty-mem-pages.c is the source of truth; vstorm splices it into the
+# cloud-init YAML at runtime via {DIRTY_MEM_SOURCE}.
 
 load 'helpers'
 
@@ -15,7 +16,7 @@ setup_file() {
     fi
     _DMP_DIR=$(mktemp -d)
     export _DMP_DIR
-    _extract_dmp_source > "$_DMP_DIR/dmp.c"
+    cp "$STANDALONE" "$_DMP_DIR/dmp.c"
     # Compile with warnings as a signal; capture them for the "no warnings" test.
     gcc -Wall -Wextra -O2 -o "$_DMP_DIR/dmp" "$_DMP_DIR/dmp.c" 2> "$_DMP_DIR/warnings.txt"
     export _DMP_BIN="$_DMP_DIR/dmp"
@@ -29,19 +30,6 @@ setup() {
     if [[ -n "${_DMP_NO_GCC:-}" ]]; then
         skip "gcc not available"
     fi
-}
-
-# Extract the first write_files content block (dirty-mem-pages.c) from the YAML,
-# stripping the 6-space indent. Mirrors the extractor in 13-workload-script.bats.
-_extract_dmp_source() {
-    awk '
-        /^    content: \|$/ && !block_done { in_block=1; next }
-        in_block && /^  - path:/ { in_block=0; block_done=1; next }
-        in_block {
-            if (/^      .*/) print substr($0, 7)
-            else if (/^[[:space:]]*$/) print ""
-        }
-    ' "$YAML"
 }
 
 # Run the binary with a 1s timeout (it loops forever on valid input) and merge
@@ -63,17 +51,18 @@ run_dmp_ok() {
 # ---------------------------------------------------------------
 # Source integrity: extraction, drift guard, clean compile
 # ---------------------------------------------------------------
-@test "DMP: C source can be extracted from cloudinit YAML" {
-    local src="$_DMP_DIR/dmp.c"
-    [[ -s "$src" ]]
-    grep -q 'parse_input' "$src"
-    grep -q 'int main' "$src"
+@test "DMP: standalone C source is the source of truth and compiles" {
+    [[ -s "$STANDALONE" ]]
+    grep -q 'parse_input' "$STANDALONE"
+    grep -q 'int main' "$STANDALONE"
 }
 
-@test "DMP: embedded YAML copy matches standalone .c (ignoring blank lines)" {
-    # Guards against the two copies drifting out of sync.
-    diff <(grep -v '^[[:space:]]*$' "$_DMP_DIR/dmp.c") \
-         <(grep -v '^[[:space:]]*$' "$STANDALONE")
+@test "DMP: profile uses placeholders, not an embedded C source or service" {
+    # Source + service are spliced in at runtime, not embedded byte-for-byte.
+    grep -qE '^[[:space:]]*\{DIRTY_MEM_SOURCE\}[[:space:]]*$' "$YAML"
+    grep -qE '^[[:space:]]*\{DIRTY_MEM_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
+    ! grep -q 'int main' "$YAML"
+    ! grep -q 'ExecStart=/usr/local/bin/dirty-mem-pages' "$YAML"
 }
 
 @test "DMP: compiles with -Wall -Wextra and no warnings" {
