@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# Pre-push hook for vstorm
+#
+# Install with:
+#   git config core.hooksPath hooks
+# Or:
+#   ln -sf ../../hooks/pre-push .git/hooks/pre-push
+#
+# Runs advisory AI reviews via the `claude` CLI in headless mode before pushing:
+#   /code-review      -- correctness/quality review of the pushed changes
+#   /security-review  -- security review of the pushed changes
+#
+# ADVISORY ONLY: findings are printed but the push is NEVER blocked. The hook
+# runs only when the pushed commits touch code (not docs-only pushes) and can be
+# skipped entirely with VSTORM_SKIP_REVIEW=1. The reviews are read-only; they run
+# with permissions bypassed so they can read the repo without interactive prompts
+# (override via CLAUDE_REVIEW_FLAGS). Missing `claude` or a failed review is a
+# warning, not a block.
+#
+# stdin: one line per pushed ref -- "<local_ref> <local_sha> <remote_ref> <remote_sha>"
+# args:  $1 = remote name, $2 = remote URL
+
+set -u
+
+remote="${1:-origin}"
+ZERO="0000000000000000000000000000000000000000"
+
+if [[ "${VSTORM_SKIP_REVIEW:-0}" == "1" ]]; then
+    echo "pre-push: VSTORM_SKIP_REVIEW=1 -- skipping AI reviews"
+    exit 0
+fi
+
+# Collect files changed across all pushed (non-deleted) refs.
+changed=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [[ -z "${local_sha:-}" ]] && continue
+    [[ "$local_sha" == "$ZERO" ]] && continue   # branch deletion -- nothing to review
+    if [[ "${remote_sha:-$ZERO}" == "$ZERO" ]]; then
+        # New branch on the remote: diff against the remote's default branch if
+        # known, else against this branch's root commit.
+        base=$(git merge-base "$local_sha" "refs/remotes/$remote/HEAD" 2>/dev/null) \
+            || base=$(git merge-base "$local_sha" "$remote/main" 2>/dev/null) \
+            || base=$(git rev-list --max-parents=0 "$local_sha" 2>/dev/null | tail -1)
+    else
+        base="$remote_sha"
+    fi
+    [[ -z "${base:-}" ]] && continue
+    changed+=$'\n'"$(git diff --name-only "$base" "$local_sha" 2>/dev/null)"
+done
+
+# Gate: only review when code (same scope as the pre-commit test trigger) changed.
+run_review=0
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    case "$f" in
+        vstorm|templates/*|helpers/*|workload/*|tests/*.bats|tests/helpers.bash|\
+        monitoring/data-collector/*|monitoring/scripts/*|monitoring/tests/*)
+            run_review=1; break ;;
+    esac
+done <<< "$changed"
+
+if ((run_review == 0)); then
+    echo "pre-push: no code changes in push -- skipping AI reviews"
+    exit 0
+fi
+
+if ! type -p claude &>/dev/null; then
+    echo "pre-push: WARNING -- claude CLI not found, skipping AI reviews (push not blocked)"
+    exit 0
+fi
+
+CLAUDE_REVIEW_FLAGS=${CLAUDE_REVIEW_FLAGS:---permission-mode bypassPermissions}
+
+for cmd in "/code-review" "/security-review"; do
+    echo "pre-push: running ${cmd} (advisory; VSTORM_SKIP_REVIEW=1 to skip)..."
+    # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
+    claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
+        || echo "pre-push: WARNING -- ${cmd} did not complete cleanly (push not blocked)"
+done
+
+echo "pre-push: advisory reviews done -- push continues"
+exit 0

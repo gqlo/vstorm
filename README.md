@@ -310,6 +310,21 @@ The hook runs only the checks relevant to the files you are committing:
 
 If any check fails, the commit is aborted. Fix the issues and commit again. In emergencies, use `git commit --no-verify` to skip the hook.
 
+### Pre-push hook
+
+A git pre-push hook in `hooks/` runs **advisory** AI reviews via the `claude` CLI
+before a push (enabled by the same `git config core.hooksPath hooks`):
+
+| Review | Command |
+|---|---|
+| Correctness / quality | `/code-review` |
+| Security | `/security-review` |
+
+It is **advisory only** — findings are printed but the push is never blocked. It
+runs only when the pushed commits touch code (not docs-only pushes) and is skipped
+entirely with `VSTORM_SKIP_REVIEW=1 git push`. A missing `claude` CLI or a failed
+review is a warning, not a block. Override the CLI flags with `CLAUDE_REVIEW_FLAGS`.
+
 ### Project layout
 
 ```
@@ -340,6 +355,7 @@ workload/
   *.service                          # systemd units for the above
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)
+  pre-push           # git pre-push hook (advisory /code-review + /security-review)
 templates/
   namespace.yaml     # namespace template
   udn-l2.yaml        # UserDefinedNetwork (Layer 2 primary UDN)
