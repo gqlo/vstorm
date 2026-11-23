@@ -48,6 +48,13 @@ _extract_stress_script() {
     ! grep -q 'random_range' "$YAML"
 }
 
+# vstorm splices the standalone script + unit into the Secret byte-for-byte.
+@test "WL: vstorm splices script and service into cloud-init userdata byte-for-byte" {
+    assert_spliced_matches "$YAML" "path: /opt/stress_ng_random_vm.sh" "$SCRIPT"
+    assert_spliced_matches "$YAML" "path: /etc/systemd/system/stress-workload.service" \
+        "workload/stress-workload.service"
+}
+
 # ---------------------------------------------------------------
 # WL-2: Extracted script has valid bash syntax
 # ---------------------------------------------------------------

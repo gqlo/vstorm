@@ -2019,19 +2019,17 @@ firmware:
 	    [DIRTY_MEM_WORKLOAD_SERVICE]="dirty-mem-pages.service"
 	)
 	local _workload_dir
-	_workload_dir="$(dirname "${BASH_SOURCE[0]}")/workload"
-	# Pre-expand each file placeholder the profile actually uses. Indent non-blank
-	# lines by 6 spaces to match the content: | block; keep blank lines empty so
-	# the guest file stays byte-identical to its standalone source.
-	local -A _ci_splice_lines=()
-	local _ph _fname
+	_workload_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/workload"
+	# Does the profile use any file placeholder at all? Substring check only -- the
+	# splice below is gated to a placeholder alone on its line and only then reads
+	# the backing file, so a token in a comment never forces a read or a fatal.
+	local _has_file_splice=false
+	local _ph
 	for _ph in "${!_ci_file_splices[@]}"; do
-	    [[ "$cloudinit_content" == *"{${_ph}}"* ]] || continue
-	    _fname="${_ci_file_splices[$_ph]}"
-	    if [[ ! -f "$_workload_dir/$_fname" ]]; then
-		fatal "Workload file not found for {${_ph}}: $_workload_dir/$_fname"
+	    if [[ "$cloudinit_content" == *"{${_ph}}"* ]]; then
+		_has_file_splice=true
+		break
 	    fi
-	    _ci_splice_lines[$_ph]=$(awk '{ if ($0 == "") print ""; else print "      " $0 }' "$_workload_dir/$_fname")
 	done
 
 	local _has_guest_env=false
@@ -2064,19 +2062,31 @@ firmware:
 		GUEST_ENV_LINES="      # no --env passed"
 	    fi
 	fi
-	if [[ "$_has_guest_env" == true || "${#_ci_splice_lines[@]}" -gt 0 ]]; then
+	if [[ "$_has_guest_env" == true || "$_has_file_splice" == true ]]; then
 	    _ci_tmp="$cloudinit_content"
 	    cloudinit_content=""
-	    local _ci_ph
+	    local -A _ci_raw=()          # placeholder name -> raw file content (lazy, cached)
+	    local _ci_indent _ci_ph _fname
 	    while IFS= read -r line || [[ -n "$line" ]]; do
 		_ci_ph=""
-		if [[ "$line" =~ ^[[:space:]]*\{([A-Z0-9_]+)\}[[:space:]]*$ ]]; then
-		    _ci_ph="${BASH_REMATCH[1]}"
+		if [[ "$line" =~ ^([[:space:]]*)\{([A-Z0-9_]+)\}[[:space:]]*$ ]]; then
+		    _ci_indent="${BASH_REMATCH[1]}"
+		    _ci_ph="${BASH_REMATCH[2]}"
 		fi
 		if [[ "$_ci_ph" == "VSTORM_GUEST_ENV" ]]; then
 		    cloudinit_content+="$GUEST_ENV_LINES"$'\n'
-		elif [[ -n "$_ci_ph" && -n "${_ci_splice_lines[$_ci_ph]+set}" ]]; then
-		    cloudinit_content+="${_ci_splice_lines[$_ci_ph]}"$'\n'
+		elif [[ -n "$_ci_ph" && -n "${_ci_file_splices[$_ci_ph]:-}" ]]; then
+		    # Load the backing file on first use and indent non-blank lines to the
+		    # placeholder line's own indentation (keeps the spliced YAML valid at
+		    # any indent); blank lines stay empty for byte-identical guest output.
+		    if [[ -z "${_ci_raw[$_ci_ph]+set}" ]]; then
+			_fname="${_ci_file_splices[$_ci_ph]}"
+			if [[ ! -f "$_workload_dir/$_fname" ]]; then
+			    fatal "Workload file not found for {${_ci_ph}}: $_workload_dir/$_fname"
+			fi
+			_ci_raw[$_ci_ph]=$(cat "$_workload_dir/$_fname")
+		    fi
+		    cloudinit_content+=$(awk -v ind="$_ci_indent" '{ if ($0 == "") print ""; else print ind $0 }' <<< "${_ci_raw[$_ci_ph]}")$'\n'
 		else
 		    cloudinit_content+="$line"$'\n'
 		fi

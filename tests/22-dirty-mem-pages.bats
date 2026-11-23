@@ -65,6 +65,14 @@ run_dmp_ok() {
     ! grep -q 'ExecStart=/usr/local/bin/dirty-mem-pages' "$YAML"
 }
 
+# vstorm splices the standalone C source + unit into the Secret byte-for-byte
+# (checks the spliced text, not a compile).
+@test "DMP: vstorm splices C source and service into cloud-init userdata byte-for-byte" {
+    assert_spliced_matches "$YAML" "path: /usr/local/src/dirty-mem-pages.c" "$STANDALONE"
+    assert_spliced_matches "$YAML" "path: /etc/systemd/system/dirty-mem-pages.service" \
+        "workload/dirty-mem-pages.service"
+}
+
 @test "DMP: compiles with -Wall -Wextra and no warnings" {
     [[ -x "$_DMP_BIN" ]]
     run cat "$_DMP_DIR/warnings.txt"

@@ -82,6 +82,12 @@ _fio_prepare() {
     ! grep -q 'WORKLOAD_TYPE' "$YAML"
 }
 
+# vstorm splices the standalone script + unit into the Secret byte-for-byte.
+@test "FIO: vstorm splices script and service into cloud-init userdata byte-for-byte" {
+    assert_spliced_matches "$YAML" "path: /opt/fio_workload.sh" "$SCRIPT"
+    assert_spliced_matches "$YAML" "path: /etc/systemd/system/fio-workload.service" "$SERVICE"
+}
+
 @test "FIO: extracted script has valid bash syntax" {
     local script_path
     script_path=$(_extract_fio_script)
