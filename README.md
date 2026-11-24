@@ -1,25 +1,21 @@
 # Vstorm
 
 - Scale up hundreds of VMs across multiple namespaces with one command on OpenShift Virtualization, without writing YAML.
-- Auto-detects storage access modes, clone strategy, and snapshot support so it works with OCS/Ceph, LVMS, NFS, or any block- or filesystem-capable storage class.
-- **Cloud-init** injects workloads at boot (e.g. stress-ng, fio). For steady dirty anonymous memory, `workload/cloudinit-dirty-mem-pages.yaml` installs a C program, compiles it on first boot, and runs it under systemd; tune the amount with `--env DIRTY_RATE_FRACTION` (a fraction of guest physical RAM, a byte count, or a human-readable size such as `2G`).
+- **Cloud-init workload injection** is the core feature: pick a built-in profile with `--cloudinit=FILE`, tune it with repeatable `--env KEY=VALUE`, and every VM runs it at boot — no custom image required. Built-ins cover **stress-ng** (CPU / memory), **fio** (storage I/O), and **dirty memory** (`--env DIRTY_RATE_FRACTION`); drop in your own file for anything else. See the [Workload](#workload) catalog.
 - **Self-built minimal guests** (high-density VM testing): a stripped x86_64-only kernel and small rootfs, often on the order of ~80 MB per guest, so you can pack many VMs onto finite CPU and RAM and stress scheduling, networking, and storage. Host the disk where the cluster can import it (for example `--dv-url` or your DataSource). Example layout and image live under [`custom-build-images/`](custom-build-images/).
 - **`--profile`**: integrated cluster profiling captures Go runtime pprof data (CPU, heap, mutex, and more) from the KubeVirt control plane during batch runs.
-- **Quality**: 257 `bats` tests, live cluster validation, and CI on every push (as of July 2026).
 
 ---
 
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Tab completion](#clone-and-setup)
+- [Workload](#workload)
 - [Cloud-init](#cloud-init)
 - [Cluster profiling](#cluster-profiling)
 - [Options](#options)
 - [How it works](#how-it-works)
 - [Development](#development)
-- **Docs:** [logging](docs/logging.md) | [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) | [cloud-init and fio workload](docs/cloud-init-fio-workload.md) | [cloud-init and HammerDB workload (design plan)](docs/cloud-init-hammerdb-workload.md) | [workload result sync and dashboard](docs/workload-result-sync-and-dashboard.md)
-- **More docs:** [cluster profiler](docs/cluster-profiler.md) | [testing](docs/testing.md) | [WFFC base DV deadlock](docs/wffc-base-dv-deadlock.md) | [live cluster test report](docs/live-cluster-test-report.md) | [bug tracker](docs/bug-tracker.md) | [custom build images](custom-build-images/README.md)
-- **Helpers:** [vm-ssh](helpers/vm-ssh) | [vm-export](helpers/vm-export) | [install-virtctl](helpers/install-virtctl)
 
 ---
 
@@ -65,49 +61,106 @@ vstorm --memory=80Mi --cores=1 \
   --storage-size=100Mi \
   --vms=1
 
-# 5. Cloud-init workload injected at boot
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
-
-# 6. No OCS: use a different storage class (snapshots auto-disabled)
+# 5. No OCS: use a different storage class (snapshots auto-disabled)
 vstorm --storage-class=my-nfs-sc --vms=10 --namespaces=2
 
-# 6b. NFS / filesystem PVC (required for NAS storage classes that do not support Block)
+# 5b. NFS / filesystem PVC (required for NAS storage classes that do not support Block)
 vstorm --storage-class=trident-nfs-svm --volume-mode=Filesystem --vms=10 --namespaces=2
 
-# 7. Dry-run: preview generated YAML without applying
+# 6. Dry-run: preview generated YAML without applying
 vstorm -n --vms=10 --namespaces=2
 
-# 8. Delete all resources for a batch (prompts for confirmation)
+# 7. Delete all resources for a batch (prompts for confirmation)
 vstorm --delete=a3f7b2
 
-# 9. Delete all namespaces containing VMs on the cluster
+# 8. Delete all namespaces containing VMs on the cluster
 vstorm --delete-all
+```
 
-# 10. Layer 2 primary UDN + NodePort (--udn-l2 default subnet 10.132.10.0/16; --service defaults: nodeport, port 22, targetPort 22, nodePort from 32222)
+## Workload
+
+Workloads are injected into guests at boot via cloud-init (stored in a
+per-namespace Secret, so there is no size limit). Pick a profile with
+`--cloudinit=FILE` and tune it with repeatable `--env KEY=VALUE`. When
+`--cloudinit` is omitted, the default profile (SSH + boot-timestamp heartbeat,
+no workload) is auto-injected.
+
+### Workload catalog
+
+| Profile (`workload/`) | Purpose | Key `--env` knobs | Docs |
+|---|---|---|---|
+| `cloudinit-default.yaml` | SSH access + boot-timestamp heartbeat only; **no** workload (auto-injected when `--cloudinit` is omitted) | `RESULT_SERVER_URL` | — |
+| `cloudinit-stress-ng-workload.yaml` | CPU / memory stress via stress-ng | `WORKLOAD_TYPE` (`cpu-heavy`\|`balanced`\|`memory-heavy`), `STRESS_TOGETHER`, `CPU_ACTIVE_PROBABILITY`, `MEM_ACTIVE_PROBABILITY`, `*_PERCENT_MIN/MAX`, `DURATION_MIN/MAX` | [stress-ng](docs/cloud-init-stress-ng-workload.md) |
+| `cloudinit-fio-workload.yaml` | Storage I/O via fio (randrw default) | `WORKLOAD_TYPE`, `FIO_SIZE`, `FIO_RW`, `FIO_BS`, `FIO_IODEPTH`, `FIO_NUMJOBS`, `FIO_RUNTIME` | [fio](docs/cloud-init-fio-workload.md) |
+| `cloudinit-dirty-mem-pages.yaml` | Steady anonymous dirty memory (compiles `dirty-mem-pages.c` on first boot) | `DIRTY_RATE_FRACTION` (0.1–0.9 \| byte count \| size e.g. `2G`; default 0.5) | [dirty-mem-pages.c](workload/dirty-mem-pages.c) |
+| HammerDB TPROC-C *(design plan — no cloud-init file yet)* | OLTP database load | — | [HammerDB plan](docs/cloud-init-hammerdb-workload.md) |
+
+### stress-ng (CPU / memory)
+
+Memory-heavy by default; switch profile with `--env WORKLOAD_TYPE=cpu-heavy|balanced|memory-heavy`.
+
+```bash
+# default (memory-heavy)
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
+
+# cpu-heavy via env override
+vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
+```
+
+Full presets, min/max, and tunables in [docs/cloud-init-stress-ng-workload.md](docs/cloud-init-stress-ng-workload.md).
+
+### fio (storage I/O)
+
+Random read/write by default; size and pattern via `--env`. Pair with `--data-disk-size`
+to exercise a dedicated data disk (`vdb`), which the profile formats and mounts on `/root/data`.
+
+```bash
+vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env FIO_SIZE=2G --vms=5
+```
+
+Presets and `--env` tunables in [docs/cloud-init-fio-workload.md](docs/cloud-init-fio-workload.md).
+
+### Dirty memory
+
+Compiles [`workload/dirty-mem-pages.c`](workload/dirty-mem-pages.c) on first boot and dirties
+anonymous pages at a steady rate. `DIRTY_RATE_FRACTION` accepts a fraction of RAM (0.1–0.9), a
+byte count (e.g. `1073741824`), or a size (e.g. `512M`, `2G`); capped at 90% of RAM; default 0.5.
+
+```bash
+vstorm --cores=4 --memory=8Gi \
+  --cloudinit=workload/cloudinit-dirty-mem-pages.yaml \
+  --dv-url=http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow \
+  --env DIRTY_RATE_FRACTION=0.4 --vms=1
+```
+
+### Combined examples (UDN / Service)
+
+```bash
+# 1. Layer 2 primary UDN + NodePort (--udn-l2 default subnet 10.132.10.0/16; --service defaults: nodeport, port 22, targetPort 22, nodePort from 32222)
 vstorm --udn-l2 --service --vms=10 --namespaces=2
 
-# 10b. UDN with custom subnet CIDR
+# 1b. UDN with custom subnet CIDR
 vstorm --udn-l2=10.200.0.0/16 --service --vms=10 --namespaces=2
 
-# 11. UDN + container disk + NodePort (defaults: port 22, targetPort 22)
+# 2. UDN + container disk + NodePort (defaults: port 22, targetPort 22)
 vstorm --udn-l2 --service --containerdisk --vms=6 --namespaces=3
 # ssh -o PubkeyAuthentication=no root@<node-ip> -p <node-port>  (password: password)
 
-# 12. UDN + ClusterIP (defaults: port 22, targetPort 22; access via pod network from a debug pod in the namespace)
+# 3. UDN + ClusterIP (defaults: port 22, targetPort 22; access via pod network from a debug pod in the namespace)
 vstorm --udn-l2 --service=clusterip --vms=20 --namespaces=4
 # oc -n <batch-id>-ns-1 run -it --rm ssh-debug --image=quay.io/rh_ee_lguoqing/nettools-fedora:latest --restart=Never -- bash
 # ssh -o PubkeyAuthentication=no root@svc-clusterip-<batch-id>.<batch-id>-ns-1.svc.cluster.local  (password: password)
 
-# 13. UDN + NodePort: service port 8080, VM targetPort 8080 (nodeport:SERVICE_PORT)
+# 4. UDN + NodePort: service port 8080, VM targetPort 8080 (nodeport:SERVICE_PORT)
 vstorm --udn-l2 --service=nodeport:8080 --vms=10 --namespaces=2
 
-# 14. UDN + NodePort: service port 22, VM targetPort 2222 (nodeport:SERVICE_PORT:TARGET_PORT)
+# 5. UDN + NodePort: service port 22, VM targetPort 2222 (nodeport:SERVICE_PORT:TARGET_PORT)
 vstorm --udn-l2 --service=nodeport:22:2222 --vms=10 --namespaces=2
 
-# 15. VM Service without UDN (defaults: nodeport, port 22, targetPort 22)
+# 6. VM Service without UDN (defaults: nodeport, port 22, targetPort 22)
 vstorm --service --containerdisk --vms=6 --namespaces=3
 
-# 16. Descheduler stress-ng workload with UDN + NodePort (l2bridge + DHCP networkData; basename labels the batch)
+# 7. Descheduler stress-ng workload with UDN + NodePort (l2bridge + DHCP networkData; basename labels the batch)
 vstorm --memory=8Gi --cores=2 \
   --udn-l2 --service \
   --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
@@ -148,23 +201,9 @@ Override with `--cloudinit=FILE` for fio / stress-ng / dirty-mem or a custom pro
 
 ### Custom cloud-init
 
-Use `--cloudinit=FILE` to inject any cloud-init user-data file. Built-in workloads live under `workload/`.
-
-```bash
-# stress-ng workload (memory-heavy default); presets, min/max, and more in docs/cloud-init-stress-ng-workload.md
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
-
-# stress-ng with env overrides (repeatable --env); e.g. WORKLOAD_TYPE=cpu-heavy|balanced
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
-
-# Steady anonymous dirty memory: compiles workload/dirty-mem-pages.c on first boot; DIRTY_RATE_FRACTION accepts a fraction of RAM (0.1–0.9), a byte count (e.g. 1073741824), or a size (e.g. 512M, 2G); capped at 90% of RAM; default 0.5 if --env omitted
-vstorm --cores=4 --memory=8Gi --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --dv-url=http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow --env DIRTY_RATE_FRACTION=0.4 --vms=1
-
-# fio storage I/O workload (randrw default); presets and tunables in docs/cloud-init-fio-workload.md
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env FIO_SIZE=2G --vms=5
-```
-
-See [cloud-init and stress-ng workload](docs/cloud-init-stress-ng-workload.md) for stress-ng design, flow, and parameters. See [cloud-init and fio workload](docs/cloud-init-fio-workload.md) for fio presets and `--env` tunables. The dirty-mem workload uses [workload/dirty-mem-pages.c](workload/dirty-mem-pages.c).
+Use `--cloudinit=FILE` to inject any cloud-init user-data file. Built-in workloads live under
+`workload/` — see the [Workload](#workload) section above for the catalog and a per-workload
+example (stress-ng, fio, dirty memory).
 
 ### Custom VM template
 
