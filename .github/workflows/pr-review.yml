@@ -354,6 +354,25 @@ jobs:
             Follow the conventions in AGENTS.md (Bash coding standards, shell safety,
             Bats patterns, corresponding tests, YAML templates) when applicable.
 
+            This is a static code review, NOT a CI run. A dedicated workflow
+            (.github/workflows/test.yaml) already runs bats, the Python/JS tests,
+            yamllint, markdownlint, and shellcheck on every push — do not duplicate
+            it. You MUST NOT:
+            - run the test suite (bats, python -m unittest, node --test) or any
+              individual test;
+            - run linters or static analysers (yamllint, markdownlint-cli2,
+              shellcheck);
+            - install packages or tools (apt/apt-get/sudo, npm/npx, pip, etc.);
+            - execute vstorm, helpers/, workload/, or any code from the checkout.
+            Assess test coverage and correctness by READING the diff and the
+            relevant files (use git diff / grep / the Read tool) — not by executing
+            anything. CI results are authoritative for pass/fail.
+
+            Budget your turns so you ALWAYS reach step 4 and publish the comment.
+            Posting the review is the deliverable; favour a concise review that is
+            actually posted over an exhaustive one that never is. If you are running
+            low on turns, stop investigating and publish what you have.
+
             The PR branch is already checked out in the working directory.
 
             Maintain ONE persistent review comment and update it in place on every
@@ -404,7 +423,8 @@ jobs:
           claude_args: |
             --model ${{ env.VERTEX_MODEL }}
             --max-turns 50
-            --allowedTools "Read,Write,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Write,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git:*),Bash(grep:*),Bash(awk:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"
+            --disallowedTools "Bash(sudo:*),Bash(apt:*),Bash(apt-get:*),Bash(bats:*),Bash(shellcheck:*),Bash(yamllint:*),Bash(markdownlint:*),Bash(markdownlint-cli2:*),Bash(npx:*),Bash(npm:*),Bash(pip:*),Bash(pip3:*),Bash(python:*),Bash(python3:*),Bash(node:*),Bash(make:*),Bash(gcc:*),Bash(./vstorm:*),Bash(vstorm:*)"
 
       # Capture the full per-turn execution log (tool calls, per-turn token
       # usage, final result). Uploaded even when the review hits --max-turns or
