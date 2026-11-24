@@ -138,7 +138,7 @@ functions untested, and do not defer tests to a follow-up.
 
 | Code | Tests | Run |
 |---|---|---|
-| `vstorm`, `helpers/`, `workload/`, `tests/helpers.bash` | `tests/*.bats` | `bats tests/` |
+| `vstorm`, `helpers/`, `workload/`, `hooks/`, `tests/helpers.bash` | `tests/*.bats` | `bats tests/` |
 | `monitoring/data-collector/**/*.py`, `monitoring/scripts/*.py` | `monitoring/tests/test_*.py` | `python3 -m unittest discover -s monitoring/tests -v` |
 | `monitoring/data-collector/static/dashboard-lib.js` | `monitoring/tests/test_dashboard_lib.js` | `node --test monitoring/tests/test_dashboard_lib.js` |
 | Pure logic currently in `app.js` | extract into `dashboard-lib.js`, then test there | same as above |
