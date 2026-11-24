@@ -325,6 +325,7 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Claude Code Review
+        id: claude
         uses: anthropics/claude-code-action@v1
         env:
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ env.VERTEX_PROJECT_ID }}
@@ -402,5 +403,19 @@ jobs:
             do NOT submit a formal APPROVE or REQUEST CHANGES review event.
           claude_args: |
             --model ${{ env.VERTEX_MODEL }}
-            --max-turns 35
+            --max-turns 50
             --allowedTools "Read,Write,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      # Capture the full per-turn execution log (tool calls, per-turn token
+      # usage, final result). Uploaded even when the review hits --max-turns or
+      # otherwise fails, so the turn breakdown is always inspectable. Kept as a
+      # private artifact rather than echoed to the public log, since it contains
+      # raw Claude messages and tool output.
+      - name: Upload Claude execution log
+        if: always() && steps.claude.outputs.execution_file != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-log-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 14
+          if-no-files-found: warn
