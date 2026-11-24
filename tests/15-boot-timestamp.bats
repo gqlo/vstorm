@@ -10,7 +10,6 @@ load 'helpers'
 
 SCRIPT="workload/vstorm-boot-timestamp.sh"
 SERVICE="workload/vstorm-boot-timestamp.service"
-VSTORM="${VSTORM:-./vstorm}"
 
 setup() {
     # Splice tests run `vstorm -n`, which still queries oc (storageprofile /
@@ -30,36 +29,6 @@ teardown() {
         export PATH="$_BT_PATH_SAVE"
         unset _BT_PATH_SAVE
     fi
-}
-
-_extract_embedded_boot_script() {
-    local yaml=$1
-    local marker=${2:-path: /opt/vstorm-boot-timestamp.sh}
-    python3 - "$yaml" "$marker" <<'PY'
-import sys
-from pathlib import Path
-text = Path(sys.argv[1]).read_text().splitlines()
-marker = sys.argv[2]
-i = next(i for i, l in enumerate(text) if marker in l)
-j = next(j for j in range(i, i + 5) if text[j].rstrip().endswith("content: |"))
-body = []
-for k in range(j + 1, len(text)):
-    line = text[k]
-    if line.startswith("      "):
-        body.append(line[6:])
-    elif line.strip() == "":
-        nxt = next((text[n] for n in range(k + 1, len(text)) if text[n].strip() != ""), "")
-        if nxt.startswith("  - ") or (nxt and not nxt.startswith("      ")):
-            break
-        body.append("")
-    else:
-        break
-while body and body[-1] == "":
-    body.pop()
-sys.stdout.write("\n".join(body))
-if body:
-    sys.stdout.write("\n")
-PY
 }
 
 _install_mock_curl() {
@@ -230,33 +199,16 @@ PY
     done
 }
 
+# Byte-for-byte via the shared decode+extract+cmp helper (assert_spliced_matches),
+# same as tests 13/14/22. A passing cmp proves the placeholder was replaced with
+# the standalone file's exact bytes; placeholder presence in the profile is
+# covered by the "carry the ... placeholders, not embedded copies" test above.
 @test "boot-ts: vstorm splices the standalone script into cloud-init userdata byte-for-byte" {
-    local out b64 decoded emb src
-    src=$(cat "$SCRIPT")
-    out=$(bash "$VSTORM" -n --batch-id=bootsp1 --datasource=rhel9 --vms=1 \
-        --namespaces=1 --cloudinit=workload/cloudinit-default.yaml 2>/dev/null)
-    b64=$(echo "$out" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
-    [ -n "$b64" ]
-    decoded=$(echo "$b64" | base64 -d 2>/dev/null)
-    # Placeholder line is fully replaced (only the self-describing comment remains).
-    [[ "$decoded" != *$'\n      {VSTORM_BOOT_SCRIPT}\n'* ]]
-    # Spliced body equals the standalone source of truth.
-    printf '%s\n' "$decoded" > "$_BT_DIR/decoded.yaml"
-    emb=$(_extract_embedded_boot_script "$_BT_DIR/decoded.yaml")
-    [[ "$emb" == "$src" ]]
+    assert_spliced_matches workload/cloudinit-default.yaml \
+        "path: /opt/vstorm-boot-timestamp.sh" "$SCRIPT"
 }
 
 @test "boot-ts: vstorm splices the standalone systemd unit into cloud-init userdata byte-for-byte" {
-    local out b64 decoded emb src
-    src=$(cat "$SERVICE")
-    out=$(bash "$VSTORM" -n --batch-id=bootsv1 --datasource=rhel9 --vms=1 \
-        --namespaces=1 --cloudinit=workload/cloudinit-default.yaml 2>/dev/null)
-    b64=$(echo "$out" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
-    [ -n "$b64" ]
-    decoded=$(echo "$b64" | base64 -d 2>/dev/null)
-    [[ "$decoded" != *"{VSTORM_BOOT_SERVICE}"* ]]
-    printf '%s\n' "$decoded" > "$_BT_DIR/decoded.yaml"
-    emb=$(_extract_embedded_boot_script "$_BT_DIR/decoded.yaml" \
-        "path: /etc/systemd/system/vstorm-boot-timestamp.service")
-    [[ "$emb" == "$src" ]]
+    assert_spliced_matches workload/cloudinit-default.yaml \
+        "path: /etc/systemd/system/vstorm-boot-timestamp.service" "$SERVICE"
 }
