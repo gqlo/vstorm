@@ -82,7 +82,10 @@ _fio_prepare() {
     # Profile carries placeholders (script + service), not embedded copies.
     grep -qE '^[[:space:]]*\{FIO_WORKLOAD_SCRIPT\}[[:space:]]*$' "$YAML"
     grep -qE '^[[:space:]]*\{FIO_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
-    ! grep -q 'WORKLOAD_TYPE' "$YAML"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the script body were re-embedded in the profile.
+    run grep -q 'WORKLOAD_TYPE' "$YAML"
+    [ "$status" -ne 0 ]
 }
 
 # vstorm splices the standalone script + unit into the Secret byte-for-byte.
@@ -314,7 +317,10 @@ _fio_prepare() {
 @test "FIO: systemd unit is oneshot Restart=no" {
     grep -q 'Type=oneshot' "$SERVICE"
     grep -q 'Restart=no' "$SERVICE"
-    ! grep -q 'Restart=always' "$SERVICE"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the unit were changed to Restart=always.
+    run grep -q 'Restart=always' "$SERVICE"
+    [ "$status" -ne 0 ]
 }
 
 @test "FIO: unreachable RESULT_SERVER_URL spools payload and still finishes" {

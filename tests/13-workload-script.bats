@@ -48,7 +48,10 @@ _extract_stress_script() {
     # Profile carries placeholders (script + service), not embedded copies.
     grep -qE '^[[:space:]]*\{STRESS_NG_WORKLOAD_SCRIPT\}[[:space:]]*$' "$YAML"
     grep -qE '^[[:space:]]*\{STRESS_NG_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
-    ! grep -q 'random_range' "$YAML"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the script body were re-embedded in the profile.
+    run grep -q 'random_range' "$YAML"
+    [ "$status" -ne 0 ]
 }
 
 # vstorm splices the standalone script + unit into the Secret byte-for-byte.

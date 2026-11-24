@@ -72,7 +72,7 @@ run_review=0
 while IFS= read -r f; do
     [[ -z "$f" ]] && continue
     case "$f" in
-        vstorm|templates/*|helpers/*|workload/*|tests/*.bats|tests/helpers.bash|\
+        vstorm|templates/*|helpers/*|workload/*|hooks/*|tests/*.bats|tests/helpers.bash|\
         monitoring/data-collector/*|monitoring/scripts/*|monitoring/tests/*)
             run_review=1; break ;;
     esac

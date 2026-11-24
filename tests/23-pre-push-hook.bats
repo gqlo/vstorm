@@ -93,6 +93,18 @@ _commit() {
 	grep -q -- "/security-review" "$CLAUDE_CALL_LOG"
 }
 
+# hooks/pre-push gate: a change to the hooks themselves is code too
+@test "PP: a hooks-only change opens the gate" {
+	local base head
+	base=$(_commit README.md "v1")
+	head=$(_commit hooks/pre-push "#!/bin/bash")
+	run env PATH="$_PP_STUB:$PATH" \
+		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"advisory reviews done"* ]]
+	grep -q -- "/code-review" "$CLAUDE_CALL_LOG"
+}
+
 # ===================================================================
 # PP: ref/base resolution
 # ===================================================================
