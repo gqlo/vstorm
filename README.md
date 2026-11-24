@@ -310,6 +310,23 @@ The hook runs only the checks relevant to the files you are committing:
 
 If any check fails, the commit is aborted. Fix the issues and commit again. In emergencies, use `git commit --no-verify` to skip the hook.
 
+### Pre-push hook
+
+A git pre-push hook in `hooks/` runs **advisory** AI reviews via the `claude` CLI
+before a push (enabled by the same `git config core.hooksPath hooks`):
+
+| Review | Command |
+|---|---|
+| Correctness / quality | `/code-review` |
+| Security | `/security-review` |
+
+It is **advisory only** — findings are printed but the push is never blocked. It
+runs only when the pushed commits touch code (not docs-only pushes) and is skipped
+entirely with `VSTORM_SKIP_REVIEW=1 git push`. A missing `claude` CLI or a failed
+review is a warning, not a block. Override the CLI flags with `CLAUDE_REVIEW_FLAGS`.
+Each review is capped by `CLAUDE_REVIEW_TIMEOUT` seconds (default 600; `0`
+disables the cap) so a hung `claude` cannot stall the push.
+
 ### Project layout
 
 ```
@@ -331,9 +348,16 @@ workload/
   cloudinit-stress-ng-workload.yaml  # unified stress-ng workload (WORKLOAD_TYPE, env overrides)
   cloudinit-fio-workload.yaml        # fio storage I/O workload (WORKLOAD_TYPE, env overrides)
   cloudinit-dirty-mem-pages.yaml     # compile to dirty-mem-pages; --env DIRTY_RATE_FRACTION=0.1-0.9 | bytes | size (e.g. 2G)
-  dirty-mem-pages.c                  # source for dirty-mem workload (embedded in cloud-init YAML)
+  # Standalone payloads/units (source of truth) spliced into the profiles at
+  # runtime via {PLACEHOLDER}s (see vstorm cloud-init handling):
+  stress_ng_random_vm.sh             # stress-ng workload script
+  fio_workload.sh                    # fio workload script
+  dirty-mem-pages.c                  # source for dirty-mem workload
+  vstorm-boot-timestamp.sh           # shared boot-timestamp agent
+  *.service                          # systemd units for the above
 hooks/
   pre-commit         # git pre-commit hook (runs tests and linters)
+  pre-push           # git pre-push hook (advisory /code-review + /security-review)
 templates/
   namespace.yaml     # namespace template
   udn-l2.yaml        # UserDefinedNetwork (Layer 2 primary UDN)

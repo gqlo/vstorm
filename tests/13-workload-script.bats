@@ -1,15 +1,20 @@
 #!/usr/bin/env bats
-# Extract the embedded stress-ng script from cloud-init YAML and test it (syntax, startup output).
-# No standalone script file: the YAML is the source of truth; we extract at test time.
+# Test the stress-ng workload script (syntax, startup output, branch coverage).
+# The standalone workload/stress_ng_random_vm.sh is the source of truth; vstorm
+# splices it into the cloud-init YAML at runtime via {STRESS_NG_WORKLOAD_SCRIPT}.
 
 load 'helpers'
 
 YAML="workload/cloudinit-stress-ng-workload.yaml"
+SCRIPT="workload/stress_ng_random_vm.sh"
 
 # The embedded script installs stress-ng when missing, then prints startup.
 # CI/minimal runners often have no stress-ng and no working package install;
 # prepend a no-op stress-ng so runtime tests see the banner and branch lines.
 setup_file() {
+    # The splice test runs `vstorm -n`, which queries oc during access-mode
+    # detection -- mock it so tests never touch a real cluster.
+    setup_oc_mock
     _WL_MOCK_STRESS_BIN=$(mktemp -d)
     cat > "$_WL_MOCK_STRESS_BIN/stress-ng" << 'MOCKEOF'
 #!/bin/bash
@@ -23,36 +28,37 @@ teardown_file() {
     [[ -n "${_WL_MOCK_STRESS_BIN:-}" ]] && rm -rf "$_WL_MOCK_STRESS_BIN"
 }
 
-# Extract the first write_files content block (the script) from the YAML.
-# Output: script with leading 6-space indent stripped, to a temp file; echo path.
-# Caller must not delete the file if they need it; we use it in the same test.
+# Copy the standalone source of truth to a temp file (callers run and rm it).
 _extract_stress_script() {
     local out
     out=$(mktemp)
-    # First write_files content block only (script); next "  - path:" ends it.
-    awk '
-        /^    content: \|$/ && !block_done { in_block=1; next }
-        in_block && /^  - path:/ { in_block=0; block_done=1; next }
-        in_block {
-            if (/^      .*/) print substr($0, 7)
-            else if (/^[[:space:]]*$/) print ""
-        }
-    ' "$YAML" > "$out"
+    cp "$SCRIPT" "$out"
     echo "$out"
 }
 
 # ---------------------------------------------------------------
-# WL-1: Script can be extracted from cloud-init YAML
+# WL-1: standalone script exists and the profile references it via placeholder
 # ---------------------------------------------------------------
-@test "WL: script can be extracted from cloudinit YAML" {
-    local script_path
-    script_path=$(_extract_stress_script)
-    [[ -f "$script_path" ]]
-    [[ -s "$script_path" ]]
-    grep -q '#!/bin/bash' "$script_path"
-    grep -q 'CPU_ACTIVE_PROBABILITY' "$script_path"
-    grep -q 'random_range' "$script_path"
-    rm -f "$script_path"
+@test "WL: standalone script is the source of truth and profile uses the placeholder" {
+    [[ -f "$SCRIPT" ]]
+    [[ -s "$SCRIPT" ]]
+    grep -q '#!/bin/bash' "$SCRIPT"
+    grep -q 'CPU_ACTIVE_PROBABILITY' "$SCRIPT"
+    grep -q 'random_range' "$SCRIPT"
+    # Profile carries placeholders (script + service), not embedded copies.
+    grep -qE '^[[:space:]]*\{STRESS_NG_WORKLOAD_SCRIPT\}[[:space:]]*$' "$YAML"
+    grep -qE '^[[:space:]]*\{STRESS_NG_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the script body were re-embedded in the profile.
+    run grep -q 'random_range' "$YAML"
+    [ "$status" -ne 0 ]
+}
+
+# vstorm splices the standalone script + unit into the Secret byte-for-byte.
+@test "WL: vstorm splices script and service into cloud-init userdata byte-for-byte" {
+    assert_spliced_matches "$YAML" "path: /opt/stress_ng_random_vm.sh" "$SCRIPT"
+    assert_spliced_matches "$YAML" "path: /etc/systemd/system/stress-workload.service" \
+        "workload/stress-workload.service"
 }
 
 # ---------------------------------------------------------------

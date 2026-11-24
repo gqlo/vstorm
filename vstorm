@@ -2003,9 +2003,38 @@ firmware:
 
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
 	cloudinit_content=$(cat "$CLOUDINIT_FILE")
-	_guest_env_branch=false
-	if [[ "$cloudinit_content" == *"{VSTORM_GUEST_ENV}"* ]]; then
-	    _guest_env_branch=true
+	# Workload payloads/units are standalone files under workload/ (single source
+	# of truth). Each profile references one with a {PLACEHOLDER} alone on its
+	# write_files `content: |` line; vstorm splices the file in at runtime instead
+	# of embedding a copy in every cloud-init YAML. {VSTORM_GUEST_ENV} is handled
+	# separately below (its value is computed from --env, not read from a file).
+	local -A _ci_file_splices=(
+	    [VSTORM_BOOT_SCRIPT]="vstorm-boot-timestamp.sh"
+	    [VSTORM_BOOT_SERVICE]="vstorm-boot-timestamp.service"
+	    [FIO_WORKLOAD_SCRIPT]="fio_workload.sh"
+	    [FIO_WORKLOAD_SERVICE]="fio-workload.service"
+	    [STRESS_NG_WORKLOAD_SCRIPT]="stress_ng_random_vm.sh"
+	    [STRESS_NG_WORKLOAD_SERVICE]="stress-workload.service"
+	    [DIRTY_MEM_SOURCE]="dirty-mem-pages.c"
+	    [DIRTY_MEM_WORKLOAD_SERVICE]="dirty-mem-pages.service"
+	)
+	local _workload_dir
+	_workload_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/workload"
+	# Does the profile use any file placeholder at all? Substring check only -- the
+	# splice below is gated to a placeholder alone on its line and only then reads
+	# the backing file, so a token in a comment never forces a read or a fatal.
+	local _has_file_splice=false
+	local _ph
+	for _ph in "${!_ci_file_splices[@]}"; do
+	    if [[ "$cloudinit_content" == *"{${_ph}}"* ]]; then
+		_has_file_splice=true
+		break
+	    fi
+	done
+
+	local _has_guest_env=false
+	[[ "$cloudinit_content" == *"{VSTORM_GUEST_ENV}"* ]] && _has_guest_env=true
+	if [[ "$_has_guest_env" == true ]]; then
 	    # Count user --env before auto-inject so we can keep the “no --env” marker.
 	    local -i _user_env_count=${#GUEST_ENV_ARR[@]}
 	    # Always inject batch id for result sync / policy poll (no-op if already set).
@@ -2032,11 +2061,32 @@ firmware:
 	    else
 		GUEST_ENV_LINES="      # no --env passed"
 	    fi
-	    _ci_tmp=$(cat "$CLOUDINIT_FILE")
+	fi
+	if [[ "$_has_guest_env" == true || "$_has_file_splice" == true ]]; then
+	    _ci_tmp="$cloudinit_content"
 	    cloudinit_content=""
+	    local -A _ci_raw=()          # placeholder name -> raw file content (lazy, cached)
+	    local _ci_indent _ci_ph _fname
 	    while IFS= read -r line || [[ -n "$line" ]]; do
-		if [[ "$line" =~ ^[[:space:]]*\{VSTORM_GUEST_ENV\}[[:space:]]*$ ]]; then
+		_ci_ph=""
+		if [[ "$line" =~ ^([[:space:]]*)\{([A-Z0-9_]+)\}[[:space:]]*$ ]]; then
+		    _ci_indent="${BASH_REMATCH[1]}"
+		    _ci_ph="${BASH_REMATCH[2]}"
+		fi
+		if [[ "$_ci_ph" == "VSTORM_GUEST_ENV" ]]; then
 		    cloudinit_content+="$GUEST_ENV_LINES"$'\n'
+		elif [[ -n "$_ci_ph" && -n "${_ci_file_splices[$_ci_ph]:-}" ]]; then
+		    # Load the backing file on first use and indent non-blank lines to the
+		    # placeholder line's own indentation (keeps the spliced YAML valid at
+		    # any indent); blank lines stay empty for byte-identical guest output.
+		    if [[ -z "${_ci_raw[$_ci_ph]+set}" ]]; then
+			_fname="${_ci_file_splices[$_ci_ph]}"
+			if [[ ! -f "$_workload_dir/$_fname" ]]; then
+			    fatal "Workload file not found for {${_ci_ph}}: $_workload_dir/$_fname"
+			fi
+			_ci_raw[$_ci_ph]=$(cat "$_workload_dir/$_fname")
+		    fi
+		    cloudinit_content+=$(awk -v ind="$_ci_indent" '{ if ($0 == "") print ""; else print ind $0 }' <<< "${_ci_raw[$_ci_ph]}")$'\n'
 		else
 		    cloudinit_content+="$line"$'\n'
 		fi

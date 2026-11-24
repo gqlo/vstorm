@@ -1,0 +1,15 @@
+[Unit]
+Description=Unified stress-ng workload simulator (WORKLOAD_TYPE=memory-heavy|cpu-heavy|balanced)
+After=network.target vstorm-boot-timestamp.service
+Wants=vstorm-boot-timestamp.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/vstorm-guest-env
+EnvironmentFile=-/etc/default/stress-workload
+ExecStart=/opt/stress_ng_random_vm.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

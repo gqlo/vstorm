@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# Pre-push hook for vstorm
+#
+# Install with:
+#   git config core.hooksPath hooks
+# Or:
+#   ln -sf ../../hooks/pre-push .git/hooks/pre-push
+#
+# Runs advisory AI reviews via the `claude` CLI in headless mode before pushing:
+#   /code-review      -- correctness/quality review of the pushed changes
+#   /security-review  -- security review of the pushed changes
+#
+# ADVISORY ONLY: findings are printed but the push is NEVER blocked. The hook
+# runs only when the pushed commits touch code (not docs-only pushes) and can be
+# skipped entirely with VSTORM_SKIP_REVIEW=1. The /code-review and /security-review
+# commands only read the repo, but they run with --permission-mode bypassPermissions
+# (CLAUDE_REVIEW_FLAGS) so they are not prompted -- this grants the nested claude
+# session unprompted tool access and is NOT a sandboxed read-only boundary, so only
+# enable this hook on a trusted dev workstation. Each review is capped by
+# CLAUDE_REVIEW_TIMEOUT (seconds) so a hung claude cannot stall the push. Missing
+# `claude`, a timeout, or a failed review is a warning, not a block.
+#
+# stdin: one line per pushed ref -- "<local_ref> <local_sha> <remote_ref> <remote_sha>"
+# args:  $1 = remote name, $2 = remote URL
+
+# Intentionally `set -u` only, NOT `set -eu`: a pre-push hook that exits non-zero
+# blocks the push, so `set -e` would turn any incidental non-zero (e.g. the
+# base-resolution fallback chain) into a blocked push -- the opposite of this
+# hook's advisory, never-block contract. (pre-commit uses `set -eu` because there
+# failing *should* block.)
+set -u
+
+remote="${1:-origin}"
+ZERO="0000000000000000000000000000000000000000"
+
+if [[ "${VSTORM_SKIP_REVIEW:-0}" == "1" ]]; then
+    echo "pre-push: VSTORM_SKIP_REVIEW=1 -- skipping AI reviews"
+    exit 0
+fi
+
+# Collect files changed across all pushed (non-deleted) refs.
+changed=""
+force_review=0
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [[ -z "${local_sha:-}" ]] && continue
+    [[ "$local_sha" == "$ZERO" ]] && continue   # branch deletion -- nothing to review
+    if [[ "${remote_sha:-$ZERO}" == "$ZERO" ]]; then
+        # New branch on the remote: diff against the remote's default branch if
+        # known, else against this branch's root commit.
+        base=$(git merge-base "$local_sha" "refs/remotes/$remote/HEAD" 2>/dev/null) \
+            || base=$(git merge-base "$local_sha" "$remote/main" 2>/dev/null) \
+            || base=$(git rev-list --max-parents=0 "$local_sha" 2>/dev/null | tail -1)
+    else
+        base="$remote_sha"
+    fi
+    [[ -z "${base:-}" ]] && continue
+    # --no-renames so a rename shows both the old and new path: code moved out of
+    # a reviewed directory still triggers that directory's review. A failed diff
+    # (e.g. base is not a local object in a shallow clone) must not look like
+    # "no changes" and silently skip the reviews -- force a review in that case.
+    if _diff=$(git diff --name-only --no-renames "$base" "$local_sha" 2>/dev/null); then
+        changed+=$'\n'"$_diff"
+    else
+        echo "pre-push: WARNING -- could not diff ${base}..${local_sha}; running reviews to be safe"
+        force_review=1
+    fi
+done
+
+# Gate: only review when code (same scope as the pre-commit test trigger) changed.
+run_review=0
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    case "$f" in
+        vstorm|templates/*|helpers/*|workload/*|hooks/*|tests/*.bats|tests/helpers.bash|\
+        monitoring/data-collector/*|monitoring/scripts/*|monitoring/tests/*)
+            run_review=1; break ;;
+    esac
+done <<< "$changed"
+
+# A diff that could not be computed above forces a review regardless of the gate.
+(( force_review )) && run_review=1
+
+if ((run_review == 0)); then
+    echo "pre-push: no code changes in push -- skipping AI reviews"
+    exit 0
+fi
+
+if ! type -p claude &>/dev/null; then
+    echo "pre-push: WARNING -- claude CLI not found, skipping AI reviews (push not blocked)"
+    exit 0
+fi
+
+CLAUDE_REVIEW_FLAGS=${CLAUDE_REVIEW_FLAGS:---permission-mode bypassPermissions}
+# Cap each advisory review so a hung/slow claude CLI can't stall the push
+# indefinitely (the feature is non-blocking). Seconds; 0 disables the cap.
+CLAUDE_REVIEW_TIMEOUT=${CLAUDE_REVIEW_TIMEOUT:-600}
+
+for cmd in "/code-review" "/security-review"; do
+    echo "pre-push: running ${cmd} (advisory; VSTORM_SKIP_REVIEW=1 to skip)..."
+    if (( CLAUDE_REVIEW_TIMEOUT > 0 )); then
+        # A cap was requested: if `timeout` is unavailable (e.g. stock macOS),
+        # skip the review rather than run it unbounded -- an unbounded claude is
+        # exactly the hang this cap exists to prevent. Set CLAUDE_REVIEW_TIMEOUT=0
+        # to opt into running without a cap.
+        if ! type -p timeout &>/dev/null; then
+            echo "pre-push: WARNING -- 'timeout' not found; skipping ${cmd} to avoid an unbounded review (set CLAUDE_REVIEW_TIMEOUT=0 to run without a cap)"
+            continue
+        fi
+        # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
+        timeout "$CLAUDE_REVIEW_TIMEOUT" claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
+            || echo "pre-push: WARNING -- ${cmd} timed out or did not complete cleanly (push not blocked)"
+    else
+        # CLAUDE_REVIEW_TIMEOUT=0: run without a cap (explicit opt-out).
+        # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
+        claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
+            || echo "pre-push: WARNING -- ${cmd} did not complete cleanly (push not blocked)"
+    fi
+done
+
+echo "pre-push: advisory reviews done -- push continues"
+exit 0

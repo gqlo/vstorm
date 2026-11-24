@@ -207,8 +207,11 @@ Shared across **all** workload cloud-inits via `vstorm-boot-timestamp.service` (
   `vm_ready_s` (boot−dv created). Blank when either endpoint is missing. PVC bound time
   comes from the owning DV `Bound=True` condition (`lastTransitionTime`).
 
-Standalone source of the script: [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh)
-(single source of truth; embedded `write_files` copies must stay identical — covered by bats).
+Standalone sources: [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh)
+(the guest agent) and [`workload/vstorm-boot-timestamp.service`](../workload/vstorm-boot-timestamp.service)
+(its systemd unit). Single source of truth: each profile carries `{VSTORM_BOOT_SCRIPT}` and
+`{VSTORM_BOOT_SERVICE}` placeholders in its `write_files` block that vstorm splices these files
+into at runtime — covered by bats.
 
 ## Host-side manifest (vstorm)
 
@@ -587,7 +590,8 @@ See **[Simple path (recommended)](#simple-path-recommended)** above. Cap jobs wi
 |------|--------|
 | [`vstorm`](../vstorm) | POSTs `record_type: "manifest"` when `RESULT_SERVER_URL` is in `--env`; auto-injects `VSTORM_BATCH_ID`; optional truncated `log_text` |
 | [`workload/cloudinit-fio-workload.yaml`](../workload/cloudinit-fio-workload.yaml) | Fio one-shot; result POST; reads shared boot timestamp |
-| [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh) | Shared boot file + optional boot heartbeat POST (embedded in all cloud-inits) |
+| [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh) | Shared boot file + optional boot heartbeat POST (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SCRIPT}`) |
+| [`workload/vstorm-boot-timestamp.service`](../workload/vstorm-boot-timestamp.service) | systemd unit that runs the boot agent (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SERVICE}`) |
 | `monitoring/data-collector/serve.py` | Ingest; policy GET/PUT/fan-out; remaining consume on cycle ingest; VM status rollups; ISO filenames |
 | [`monitoring/data-collector/static/`](../monitoring/data-collector/static/) | Browse batches / VMs / payloads; helpers in `dashboard-lib.js` |
 | [`docs/cloud-init-fio-workload.md`](cloud-init-fio-workload.md) | Env table includes `RESULT_SERVER_*` / `WORKLOAD_RUN_*` |

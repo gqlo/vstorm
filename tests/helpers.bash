@@ -272,3 +272,68 @@ esac
 MOCKEOF
     chmod +x "$dir/virtctl"
 }
+
+# Dry-run vstorm with the given cloud-init profile and print the decoded userdata
+# of the generated cloud-init Secret. Extra args are forwarded to vstorm.
+# Usage: decode_cloudinit_userdata <cloudinit.yaml> [vstorm args...]
+decode_cloudinit_userdata() {
+    local cloudinit=$1
+    shift
+    local out b64
+    out=$(bash "${VSTORM:-./vstorm}" -n --batch-id=splice1 --datasource=rhel9 \
+        --vms=1 --namespaces=1 --cloudinit="$cloudinit" "$@" 2>/dev/null) || return 1
+    b64=$(printf '%s\n' "$out" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
+    [[ -n "$b64" ]] || return 1
+    printf '%s' "$b64" | base64 -d 2>/dev/null
+}
+
+# Extract a write_files `content: |` block body (6-space indent stripped) from the
+# YAML file $1, addressed by a `path:` marker $2. Mirrors the extractor in
+# tests/15-boot-timestamp.bats but takes the marker as an argument.
+# Usage: extract_writefile_block <yaml-file> <path-marker>
+extract_writefile_block() {
+    local file=$1 marker=$2
+    python3 - "$file" "$marker" <<'PY'
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text().splitlines()
+marker = sys.argv[2]
+i = next(i for i, l in enumerate(text) if marker in l)
+j = next(j for j in range(i, i + 5) if text[j].rstrip().endswith("content: |"))
+body = []
+for k in range(j + 1, len(text)):
+    line = text[k]
+    if line.startswith("      "):
+        body.append(line[6:])
+    elif line.strip() == "":
+        nxt = next((text[n] for n in range(k + 1, len(text)) if text[n].strip() != ""), "")
+        if nxt.startswith("  - ") or nxt.strip() == "runcmd:" or (nxt and not nxt.startswith("      ")):
+            break
+        body.append("")
+    else:
+        break
+while body and body[-1] == "":
+    body.pop()
+sys.stdout.write("\n".join(body))
+if body:
+    sys.stdout.write("\n")
+PY
+}
+
+# Assert that vstorm splices <standalone> into <cloudinit> (addressed by
+# <path-marker>) byte-for-byte through the real cloud-init Secret path.
+# Usage: assert_spliced_matches <cloudinit.yaml> <path-marker> <standalone-file>
+assert_spliced_matches() {
+    local cloudinit=$1 marker=$2 standalone=$3
+    local tmp got_file rc
+    tmp=$(mktemp)
+    got_file=$(mktemp)
+    decode_cloudinit_userdata "$cloudinit" > "$tmp" || { rm -f "$tmp" "$got_file"; return 1; }
+    # Compare as files with cmp: command substitution strips trailing newlines,
+    # so "$(...)" == "$(cat ...)" would mask a final-newline mismatch despite the
+    # "byte-for-byte" claim.
+    extract_writefile_block "$tmp" "$marker" > "$got_file"
+    if cmp -s "$got_file" "$standalone"; then rc=0; else rc=1; fi
+    rm -f "$tmp" "$got_file"
+    return "$rc"
+}

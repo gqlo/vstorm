@@ -1,12 +1,18 @@
 #!/usr/bin/env bats
-# Extract the embedded fio script from cloud-init YAML and test it (syntax, one-shot run).
-# No standalone script file: the YAML is the source of truth; we extract at test time.
+# Test the fio workload script (syntax, one-shot run, branch coverage).
+# The standalone workload/fio_workload.sh is the source of truth; vstorm splices
+# it into the cloud-init YAML at runtime via {FIO_WORKLOAD_SCRIPT}.
 
 load 'helpers'
 
 YAML="workload/cloudinit-fio-workload.yaml"
+SCRIPT="workload/fio_workload.sh"
+SERVICE="workload/fio-workload.service"
 
 setup_file() {
+    # The splice test runs `vstorm -n`, which queries oc during access-mode
+    # detection -- mock it so tests never touch a real cluster.
+    setup_oc_mock
     _WL_MOCK_FIO_BIN=$(mktemp -d)
     _WL_FIO_ARGS_FILE=$(mktemp)
     export _WL_FIO_ARGS_FILE
@@ -49,14 +55,7 @@ teardown_file() {
 _extract_fio_script() {
     local out
     out=$(mktemp)
-    awk '
-        /^    content: \|$/ && !block_done { in_block=1; next }
-        in_block && /^  - path:/ { in_block=0; block_done=1; next }
-        in_block {
-            if (/^      .*/) print substr($0, 7)
-            else if (/^[[:space:]]*$/) print ""
-        }
-    ' "$YAML" > "$out"
+    cp "$SCRIPT" "$out"
     echo "$out"
 }
 
@@ -73,16 +72,26 @@ _fio_prepare() {
     _fio_args_reset
 }
 
-@test "FIO: script can be extracted from cloudinit YAML" {
-    local script_path
-    script_path=$(_extract_fio_script)
-    [[ -f "$script_path" ]]
-    [[ -s "$script_path" ]]
-    grep -q '#!/bin/bash' "$script_path"
-    grep -q 'WORKLOAD_TYPE' "$script_path"
-    grep -q 'one-shot' "$script_path"
-    grep -q 'FIO_TIME_BASED' "$script_path"
-    rm -f "$script_path"
+@test "FIO: standalone script is the source of truth and profile uses the placeholder" {
+    [[ -f "$SCRIPT" ]]
+    [[ -s "$SCRIPT" ]]
+    grep -q '#!/bin/bash' "$SCRIPT"
+    grep -q 'WORKLOAD_TYPE' "$SCRIPT"
+    grep -q 'one-shot' "$SCRIPT"
+    grep -q 'FIO_TIME_BASED' "$SCRIPT"
+    # Profile carries placeholders (script + service), not embedded copies.
+    grep -qE '^[[:space:]]*\{FIO_WORKLOAD_SCRIPT\}[[:space:]]*$' "$YAML"
+    grep -qE '^[[:space:]]*\{FIO_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the script body were re-embedded in the profile.
+    run grep -q 'WORKLOAD_TYPE' "$YAML"
+    [ "$status" -ne 0 ]
+}
+
+# vstorm splices the standalone script + unit into the Secret byte-for-byte.
+@test "FIO: vstorm splices script and service into cloud-init userdata byte-for-byte" {
+    assert_spliced_matches "$YAML" "path: /opt/fio_workload.sh" "$SCRIPT"
+    assert_spliced_matches "$YAML" "path: /etc/systemd/system/fio-workload.service" "$SERVICE"
 }
 
 @test "FIO: extracted script has valid bash syntax" {
@@ -298,15 +307,20 @@ _fio_prepare() {
 }
 
 @test "FIO: boot timestamp unit is present and ordered before fio" {
+    # Boot unit is referenced (placeholder path + runcmd enable) in the profile;
+    # fio's unit orders itself after it (now in the standalone unit file).
     grep -q 'path: /opt/vstorm-boot-timestamp.sh' "$YAML"
     grep -q 'vstorm-boot-timestamp.service' "$YAML"
-    grep -q 'After=.*vstorm-boot-timestamp.service' "$YAML"
+    grep -q 'After=.*vstorm-boot-timestamp.service' "$SERVICE"
 }
 
 @test "FIO: systemd unit is oneshot Restart=no" {
-    grep -q 'Type=oneshot' "$YAML"
-    grep -q 'Restart=no' "$YAML"
-    ! grep -q 'Restart=always' "$YAML"
+    grep -q 'Type=oneshot' "$SERVICE"
+    grep -q 'Restart=no' "$SERVICE"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the unit were changed to Restart=always.
+    run grep -q 'Restart=always' "$SERVICE"
+    [ "$status" -ne 0 ]
 }
 
 @test "FIO: unreachable RESULT_SERVER_URL spools payload and still finishes" {
