@@ -17,6 +17,10 @@ setup() {
 	_PP_STUB=$(mktemp -d)
 	export CLAUDE_CALL_LOG="$_PP_DIR/claude-calls.log"
 	: > "$CLAUDE_CALL_LOG"
+	# Pin the review cap so tests never inherit it from the environment. 0 means
+	# uncapped, so the stub-run tests don't depend on a `timeout` utility being
+	# installed (it isn't on stock macOS); the timeout-specific tests override it.
+	export CLAUDE_REVIEW_TIMEOUT=0
 	# Stub claude: record the invocation (so a test can assert a review would
 	# run) and exit 0 instead of launching a real review.
 	cat > "$_PP_STUB/claude" <<EOF
@@ -159,7 +163,7 @@ _commit() {
 	ln -s "$(command -v bash)" "$cleanbin/bash"
 	ln -s "$(command -v git)" "$cleanbin/git"
 	cp "$_PP_STUB/claude" "$cleanbin/claude"
-	run env PATH="$cleanbin" \
+	run env CLAUDE_REVIEW_TIMEOUT=600 PATH="$cleanbin" \
 		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"'timeout' not found"* ]]
@@ -179,6 +183,20 @@ _commit() {
 	ln -s "$(command -v git)" "$cleanbin/git"
 	cp "$_PP_STUB/claude" "$cleanbin/claude"
 	run env CLAUDE_REVIEW_TIMEOUT=0 PATH="$cleanbin" \
+		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"advisory reviews done"* ]]
+	grep -q -- "/code-review" "$CLAUDE_CALL_LOG"
+}
+
+# hooks/pre-push: a positive cap with `timeout` available runs the review through
+# `timeout` (covers the wrapped branch; skipped where `timeout` is absent).
+@test "PP: a positive cap with timeout available runs the review" {
+	command -v timeout >/dev/null 2>&1 || skip "timeout utility not available"
+	local base head
+	base=$(_commit README.md "v1")
+	head=$(_commit helpers/foo.sh "echo hi")
+	run env CLAUDE_REVIEW_TIMEOUT=5 PATH="$_PP_STUB:$PATH" \
 		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"advisory reviews done"* ]]

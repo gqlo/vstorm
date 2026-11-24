@@ -324,6 +324,8 @@ It is **advisory only** — findings are printed but the push is never blocked. 
 runs only when the pushed commits touch code (not docs-only pushes) and is skipped
 entirely with `VSTORM_SKIP_REVIEW=1 git push`. A missing `claude` CLI or a failed
 review is a warning, not a block. Override the CLI flags with `CLAUDE_REVIEW_FLAGS`.
+Each review is capped by `CLAUDE_REVIEW_TIMEOUT` seconds (default 600; `0`
+disables the cap) so a hung `claude` cannot stall the push.
 
 ### Project layout
 
