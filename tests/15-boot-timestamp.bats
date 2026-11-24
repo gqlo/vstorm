@@ -13,6 +13,10 @@ SERVICE="workload/vstorm-boot-timestamp.service"
 VSTORM="${VSTORM:-./vstorm}"
 
 setup() {
+    # Splice tests run `vstorm -n`, which still queries oc (storageprofile /
+    # storageclass / vm) during access-mode detection -- mock it so tests never
+    # touch a real cluster.
+    setup_oc_mock
     _BT_DIR=$(mktemp -d)
     export RESULT_TIMESTAMP_FILE="$_BT_DIR/timestamp.txt"
     unset RESULT_SERVER_URL VSTORM_BATCH_ID RESULT_SERVER_TOKEN VSTORM_VM_NAME
@@ -217,8 +221,12 @@ PY
         grep -qE '^[[:space:]]*\{VSTORM_BOOT_SCRIPT\}[[:space:]]*$' "$y"
         grep -qE '^[[:space:]]*\{VSTORM_BOOT_SERVICE\}[[:space:]]*$' "$y"
         # Distinctive lines now live only in the standalone script/unit files.
-        ! grep -q 'Boot heartbeat posted' "$y"
-        ! grep -q 'ExecStart=/opt/vstorm-boot-timestamp.sh' "$y"
+        # Use `run` + status: a bare `! grep` is exempt from bats' errexit and
+        # would not fail the test if the forbidden pattern were present.
+        run grep -q 'Boot heartbeat posted' "$y"
+        [ "$status" -ne 0 ]
+        run grep -q 'ExecStart=/opt/vstorm-boot-timestamp.sh' "$y"
+        [ "$status" -ne 0 ]
     done
 }
 

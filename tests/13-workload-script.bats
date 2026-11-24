@@ -12,6 +12,9 @@ SCRIPT="workload/stress_ng_random_vm.sh"
 # CI/minimal runners often have no stress-ng and no working package install;
 # prepend a no-op stress-ng so runtime tests see the banner and branch lines.
 setup_file() {
+    # The splice test runs `vstorm -n`, which queries oc during access-mode
+    # detection -- mock it so tests never touch a real cluster.
+    setup_oc_mock
     _WL_MOCK_STRESS_BIN=$(mktemp -d)
     cat > "$_WL_MOCK_STRESS_BIN/stress-ng" << 'MOCKEOF'
 #!/bin/bash

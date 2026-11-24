@@ -325,10 +325,15 @@ PY
 # Usage: assert_spliced_matches <cloudinit.yaml> <path-marker> <standalone-file>
 assert_spliced_matches() {
     local cloudinit=$1 marker=$2 standalone=$3
-    local tmp got
+    local tmp got_file rc
     tmp=$(mktemp)
-    decode_cloudinit_userdata "$cloudinit" > "$tmp" || { rm -f "$tmp"; return 1; }
-    got=$(extract_writefile_block "$tmp" "$marker")
-    rm -f "$tmp"
-    [[ "$got" == "$(cat "$standalone")" ]]
+    got_file=$(mktemp)
+    decode_cloudinit_userdata "$cloudinit" > "$tmp" || { rm -f "$tmp" "$got_file"; return 1; }
+    # Compare as files with cmp: command substitution strips trailing newlines,
+    # so "$(...)" == "$(cat ...)" would mask a final-newline mismatch despite the
+    # "byte-for-byte" claim.
+    extract_writefile_block "$tmp" "$marker" > "$got_file"
+    if cmp -s "$got_file" "$standalone"; then rc=0; else rc=1; fi
+    rm -f "$tmp" "$got_file"
+    return "$rc"
 }

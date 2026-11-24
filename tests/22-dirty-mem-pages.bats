@@ -27,6 +27,9 @@ teardown_file() {
 }
 
 setup() {
+    # The splice test runs `vstorm -n`, which queries oc during access-mode
+    # detection -- mock it so tests never touch a real cluster.
+    setup_oc_mock
     if [[ -n "${_DMP_NO_GCC:-}" ]]; then
         skip "gcc not available"
     fi
@@ -61,8 +64,12 @@ run_dmp_ok() {
     # Source + service are spliced in at runtime, not embedded byte-for-byte.
     grep -qE '^[[:space:]]*\{DIRTY_MEM_SOURCE\}[[:space:]]*$' "$YAML"
     grep -qE '^[[:space:]]*\{DIRTY_MEM_WORKLOAD_SERVICE\}[[:space:]]*$' "$YAML"
-    ! grep -q 'int main' "$YAML"
-    ! grep -q 'ExecStart=/usr/local/bin/dirty-mem-pages' "$YAML"
+    # `run` + status: a bare `! grep` is exempt from bats' errexit and would not
+    # fail the test if the embedded source/unit were present.
+    run grep -q 'int main' "$YAML"
+    [ "$status" -ne 0 ]
+    run grep -q 'ExecStart=/usr/local/bin/dirty-mem-pages' "$YAML"
+    [ "$status" -ne 0 ]
 }
 
 # vstorm splices the standalone C source + unit into the Secret byte-for-byte

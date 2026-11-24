@@ -367,13 +367,16 @@ with `--dv-url` / `--datasource`.
 
 The run scripts stay the single source of truth under `workload/hammerdb/`, and
 vstorm substitutes each one into the cloud-init **Secret** at run time — no custom
-image step for them, and no new object type. This is a design option; **it is not
-implemented yet** (vstorm currently substitutes only `{VSTORM_GUEST_ENV}`).
+image step for them, and no new object type. **The HammerDB profile is not
+implemented yet**, but the file-splicing machinery it needs already exists: vstorm
+splices workload files (e.g. `{FIO_WORKLOAD_SCRIPT}`, `{VSTORM_BOOT_SCRIPT}`) via a
+placeholder→file map alongside `{VSTORM_GUEST_ENV}`. Adding HammerDB is a matter of
+adding its `{HAMMERDB_*}` entries to that map and the profile.
 
-**How it works.** vstorm already base64-encodes the userdata into the cloud-init
-Secret and substitutes `{VSTORM_GUEST_ENV}` before encoding. Add more placeholders
-handled the same way — each alone on an indented line — and have vstorm fill them
-from files at run time, reusing the existing indent/substitution machinery:
+**How it works.** vstorm splices the workload files and `{VSTORM_GUEST_ENV}` into
+the userdata before base64-encoding it into the cloud-init Secret. Add the HammerDB
+placeholders the same way — each alone on an indented line — mapped to files vstorm
+fills in at run time, reusing the existing indent/substitution machinery:
 
 | Placeholder | Filled from |
 |-------------|-------------|

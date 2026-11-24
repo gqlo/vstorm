@@ -10,6 +10,9 @@ SCRIPT="workload/fio_workload.sh"
 SERVICE="workload/fio-workload.service"
 
 setup_file() {
+    # The splice test runs `vstorm -n`, which queries oc during access-mode
+    # detection -- mock it so tests never touch a real cluster.
+    setup_oc_mock
     _WL_MOCK_FIO_BIN=$(mktemp -d)
     _WL_FIO_ARGS_FILE=$(mktemp)
     export _WL_FIO_ARGS_FILE

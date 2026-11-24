@@ -13,10 +13,13 @@
 #
 # ADVISORY ONLY: findings are printed but the push is NEVER blocked. The hook
 # runs only when the pushed commits touch code (not docs-only pushes) and can be
-# skipped entirely with VSTORM_SKIP_REVIEW=1. The reviews are read-only; they run
-# with permissions bypassed so they can read the repo without interactive prompts
-# (override via CLAUDE_REVIEW_FLAGS). Missing `claude` or a failed review is a
-# warning, not a block.
+# skipped entirely with VSTORM_SKIP_REVIEW=1. The /code-review and /security-review
+# commands only read the repo, but they run with --permission-mode bypassPermissions
+# (CLAUDE_REVIEW_FLAGS) so they are not prompted -- this grants the nested claude
+# session unprompted tool access and is NOT a sandboxed read-only boundary, so only
+# enable this hook on a trusted dev workstation. Each review is capped by
+# CLAUDE_REVIEW_TIMEOUT (seconds) so a hung claude cannot stall the push. Missing
+# `claude`, a timeout, or a failed review is a warning, not a block.
 #
 # stdin: one line per pushed ref -- "<local_ref> <local_sha> <remote_ref> <remote_sha>"
 # args:  $1 = remote name, $2 = remote URL
@@ -33,6 +36,7 @@ fi
 
 # Collect files changed across all pushed (non-deleted) refs.
 changed=""
+force_review=0
 while read -r _local_ref local_sha _remote_ref remote_sha; do
     [[ -z "${local_sha:-}" ]] && continue
     [[ "$local_sha" == "$ZERO" ]] && continue   # branch deletion -- nothing to review
@@ -46,7 +50,16 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
         base="$remote_sha"
     fi
     [[ -z "${base:-}" ]] && continue
-    changed+=$'\n'"$(git diff --name-only "$base" "$local_sha" 2>/dev/null)"
+    # --no-renames so a rename shows both the old and new path: code moved out of
+    # a reviewed directory still triggers that directory's review. A failed diff
+    # (e.g. base is not a local object in a shallow clone) must not look like
+    # "no changes" and silently skip the reviews -- force a review in that case.
+    if _diff=$(git diff --name-only --no-renames "$base" "$local_sha" 2>/dev/null); then
+        changed+=$'\n'"$_diff"
+    else
+        echo "pre-push: WARNING -- could not diff ${base}..${local_sha}; running reviews to be safe"
+        force_review=1
+    fi
 done
 
 # Gate: only review when code (same scope as the pre-commit test trigger) changed.
@@ -60,6 +73,9 @@ while IFS= read -r f; do
     esac
 done <<< "$changed"
 
+# A diff that could not be computed above forces a review regardless of the gate.
+(( force_review )) && run_review=1
+
 if ((run_review == 0)); then
     echo "pre-push: no code changes in push -- skipping AI reviews"
     exit 0
@@ -71,12 +87,21 @@ if ! type -p claude &>/dev/null; then
 fi
 
 CLAUDE_REVIEW_FLAGS=${CLAUDE_REVIEW_FLAGS:---permission-mode bypassPermissions}
+# Cap each advisory review so a hung/slow claude CLI can't stall the push
+# indefinitely (the feature is non-blocking). Seconds; 0 disables the cap.
+CLAUDE_REVIEW_TIMEOUT=${CLAUDE_REVIEW_TIMEOUT:-600}
 
 for cmd in "/code-review" "/security-review"; do
     echo "pre-push: running ${cmd} (advisory; VSTORM_SKIP_REVIEW=1 to skip)..."
-    # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
-    claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
-        || echo "pre-push: WARNING -- ${cmd} did not complete cleanly (push not blocked)"
+    if (( CLAUDE_REVIEW_TIMEOUT > 0 )) && type -p timeout &>/dev/null; then
+        # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
+        timeout "$CLAUDE_REVIEW_TIMEOUT" claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
+            || echo "pre-push: WARNING -- ${cmd} timed out or did not complete cleanly (push not blocked)"
+    else
+        # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
+        claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
+            || echo "pre-push: WARNING -- ${cmd} did not complete cleanly (push not blocked)"
+    fi
 done
 
 echo "pre-push: advisory reviews done -- push continues"
