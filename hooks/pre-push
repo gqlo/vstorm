@@ -24,6 +24,11 @@
 # stdin: one line per pushed ref -- "<local_ref> <local_sha> <remote_ref> <remote_sha>"
 # args:  $1 = remote name, $2 = remote URL
 
+# Intentionally `set -u` only, NOT `set -eu`: a pre-push hook that exits non-zero
+# blocks the push, so `set -e` would turn any incidental non-zero (e.g. the
+# base-resolution fallback chain) into a blocked push -- the opposite of this
+# hook's advisory, never-block contract. (pre-commit uses `set -eu` because there
+# failing *should* block.)
 set -u
 
 remote="${1:-origin}"
@@ -93,11 +98,20 @@ CLAUDE_REVIEW_TIMEOUT=${CLAUDE_REVIEW_TIMEOUT:-600}
 
 for cmd in "/code-review" "/security-review"; do
     echo "pre-push: running ${cmd} (advisory; VSTORM_SKIP_REVIEW=1 to skip)..."
-    if (( CLAUDE_REVIEW_TIMEOUT > 0 )) && type -p timeout &>/dev/null; then
+    if (( CLAUDE_REVIEW_TIMEOUT > 0 )); then
+        # A cap was requested: if `timeout` is unavailable (e.g. stock macOS),
+        # skip the review rather than run it unbounded -- an unbounded claude is
+        # exactly the hang this cap exists to prevent. Set CLAUDE_REVIEW_TIMEOUT=0
+        # to opt into running without a cap.
+        if ! type -p timeout &>/dev/null; then
+            echo "pre-push: WARNING -- 'timeout' not found; skipping ${cmd} to avoid an unbounded review (set CLAUDE_REVIEW_TIMEOUT=0 to run without a cap)"
+            continue
+        fi
         # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
         timeout "$CLAUDE_REVIEW_TIMEOUT" claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
             || echo "pre-push: WARNING -- ${cmd} timed out or did not complete cleanly (push not blocked)"
     else
+        # CLAUDE_REVIEW_TIMEOUT=0: run without a cap (explicit opt-out).
         # shellcheck disable=SC2086 -- CLAUDE_REVIEW_FLAGS is an intentional flag list
         claude -p "$cmd" $CLAUDE_REVIEW_FLAGS \
             || echo "pre-push: WARNING -- ${cmd} did not complete cleanly (push not blocked)"

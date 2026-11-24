@@ -129,3 +129,46 @@ _commit() {
 	[[ "$output" == *"could not diff"* ]]
 	grep -q -- "/code-review" "$CLAUDE_CALL_LOG"
 }
+
+# ===================================================================
+# PP: timeout-cap fallback
+# ===================================================================
+
+# hooks/pre-push: a requested cap (CLAUDE_REVIEW_TIMEOUT>0) with no `timeout`
+# utility must skip the review, not run claude unbounded.
+@test "PP: a requested cap with no 'timeout' utility skips the review" {
+	local base head
+	base=$(_commit README.md "v1")
+	head=$(_commit helpers/foo.sh "echo hi")
+	# A PATH with only the commands the gate path needs -- deliberately no
+	# `timeout` -- so the hook sees a cap requested but no way to enforce it.
+	local cleanbin="$_PP_DIR/cleanbin"
+	mkdir -p "$cleanbin"
+	ln -s "$(command -v bash)" "$cleanbin/bash"
+	ln -s "$(command -v git)" "$cleanbin/git"
+	cp "$_PP_STUB/claude" "$cleanbin/claude"
+	run env PATH="$cleanbin" \
+		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"'timeout' not found"* ]]
+	# The review must NOT have run unbounded.
+	[[ ! -s "$CLAUDE_CALL_LOG" ]]
+}
+
+# hooks/pre-push: CLAUDE_REVIEW_TIMEOUT=0 opts into an unbounded review even when
+# `timeout` is unavailable.
+@test "PP: CLAUDE_REVIEW_TIMEOUT=0 runs the review uncapped without timeout" {
+	local base head
+	base=$(_commit README.md "v1")
+	head=$(_commit helpers/foo.sh "echo hi")
+	local cleanbin="$_PP_DIR/cleanbin"
+	mkdir -p "$cleanbin"
+	ln -s "$(command -v bash)" "$cleanbin/bash"
+	ln -s "$(command -v git)" "$cleanbin/git"
+	cp "$_PP_STUB/claude" "$cleanbin/claude"
+	run env CLAUDE_REVIEW_TIMEOUT=0 PATH="$cleanbin" \
+		bash "$HOOK" origin "file://$_REPO" <<< "refs/heads/main $head refs/heads/main $base"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"advisory reviews done"* ]]
+	grep -q -- "/code-review" "$CLAUDE_CALL_LOG"
+}
