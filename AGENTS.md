@@ -20,7 +20,9 @@ distributed as a single self-contained file.
 - `templates/` — YAML templates with `{PLACEHOLDER}` syntax, processed by `sed`
   in `process_template()`.
 - `helpers/` — utility scripts and cloud-init YAML configs.
-- `workload/` — in-guest workload scripts and cloud-init configs.
+- `workload/` — in-guest workload scripts and cloud-init configs, one folder per
+  workload (`fio/`, `stress-ng/`, `dirty-mem/`, `hammerdb/`); `shared/` holds the
+  baseline every VM gets (`cloudinit-default.yaml`, `vstorm-boot-timestamp.{sh,service}`).
 - `tests/*.bats` — Bats tests (numbered files, dry-run and mock-based) plus
   `tests/90-unit-pure-functions.bats` (fast unit tests that source `vstorm`).
 - `monitoring/` — result collector / dashboard (Python + JS) with its own tests.
@@ -190,7 +192,7 @@ node --test monitoring/tests/test_dashboard_lib.js
 
 # YAML lint — changed plain YAML (helpers/, workload/, monitoring/yaml/,
 # monitoring/tests/fixtures/, .github/workflows/; NOT templates/)
-yamllint helpers/*.yaml workload/*.yaml monitoring/yaml/*.yaml \
+yamllint helpers/*.yaml workload/*.yaml workload/*/*.yaml monitoring/yaml/*.yaml \
   monitoring/tests/fixtures/*.yaml .github/workflows/*.yaml
 
 # Markdown lint — changed .md files

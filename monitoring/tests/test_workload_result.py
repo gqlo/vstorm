@@ -133,8 +133,8 @@ class TestHelpers(unittest.TestCase):
     def test_workload_fingerprint(self) -> None:
         self.assertEqual(wr.workload_fingerprint(_fio_payload()), "randrw/1G/4k")
         self.assertEqual(
-            wr.workload_fingerprint({"cloudinit": "workload/cloudinit-fio-workload.yaml"}),
-            "workload/cloudinit-fio-workload.yaml",
+            wr.workload_fingerprint({"cloudinit": "workload/fio/cloudinit-fio-workload.yaml"}),
+            "workload/fio/cloudinit-fio-workload.yaml",
         )
 
     def test_percentile(self) -> None:
@@ -202,7 +202,7 @@ class TestStoreIngest(unittest.TestCase):
                 "reported_at": "2026-07-22T05:50:00Z",
                 "started_at": "2026-07-22T05:48:20Z",
                 "stopped_at": "2026-07-22T05:50:00Z",
-                "cloudinit": "workload/cloudinit-fio-workload.yaml",
+                "cloudinit": "workload/fio/cloudinit-fio-workload.yaml",
                 "cores": 4,
                 "memory": "8Gi",
             }
@@ -1525,7 +1525,7 @@ class TestStoreQueries(unittest.TestCase):
                     "started_at": started,
                     "dv_created_at": started,
                     "vm_dv_created": {vm: started},
-                    "cloudinit": "workload/cloudinit-fio-workload.yaml",
+                    "cloudinit": "workload/fio/cloudinit-fio-workload.yaml",
                 }
             )
             self.store.ingest(
@@ -1570,7 +1570,7 @@ class TestStoreQueries(unittest.TestCase):
                 "snapshot_ready_at": "2026-07-22T05:48:55Z",
                 "dv_created_at": "2026-07-22T05:49:00Z",
                 "vm_dv_created": {"rhel9-snap1-1": "2026-07-22T05:49:10Z"},
-                "cloudinit": "workload/cloudinit-fio-workload.yaml",
+                "cloudinit": "workload/fio/cloudinit-fio-workload.yaml",
             }
         )
         self.store.ingest(

@@ -6,12 +6,12 @@ Run a configurable stress-ng workload inside VMs at boot. For VM CPU and memory 
 
 | Goal | Command |
 |------|---------|
-| Medium VMs + default (memory-heavy) workload | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --cores=4 --memory=8Gi --vms=10` |
-| CPU-heavy workload, 8 cores per VM | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --cores=8 --memory=16Gi --vms=5` |
-| Custom min/max CPU and memory % | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env CPU_PERCENT_MIN=25 --env CPU_PERCENT_MAX=75 --env MEM_PERCENT_MIN=40 --env MEM_PERCENT_MAX=85 --vms=10` |
-| Short duration, high activity | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env DURATION_MIN=5 --env DURATION_MAX=120 --env CPU_ACTIVE_PROBABILITY=85 --env MEM_ACTIVE_PROBABILITY=85 --vms=10` |
-| Allocate RAM only (no CPU burn) | `vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env 'STRESS_NG_CUSTOM_OPTS=--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0' --vms=5` |
-| Dry-run to preview | `vstorm -n --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=5` |
+| Medium VMs + default (memory-heavy) workload | `vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --cores=4 --memory=8Gi --vms=10` |
+| CPU-heavy workload, 8 cores per VM | `vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --cores=8 --memory=16Gi --vms=5` |
+| Custom min/max CPU and memory % | `vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env CPU_PERCENT_MIN=25 --env CPU_PERCENT_MAX=75 --env MEM_PERCENT_MIN=40 --env MEM_PERCENT_MAX=85 --vms=10` |
+| Short duration, high activity | `vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env DURATION_MIN=5 --env DURATION_MAX=120 --env CPU_ACTIVE_PROBABILITY=85 --env MEM_ACTIVE_PROBABILITY=85 --vms=10` |
+| Allocate RAM only (no CPU burn) | `vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env 'STRESS_NG_CUSTOM_OPTS=--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0' --vms=5` |
+| Dry-run to preview | `vstorm -n --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=5` |
 
 Default preset is **memory-heavy** (no `--env` needed). Combine with any VM sizing.
 
@@ -30,7 +30,7 @@ The workload **installs `stress-ng` via the guest's package manager** at first b
 ## Run at boot
 
 ```bash
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 ```
 
 Cloud-init will install `stress-ng`, write the workload script to `/opt/stress_ng_random_vm.sh`, and enable `stress-workload.service` so the workload runs forever (and survives reboots).
@@ -45,11 +45,11 @@ Cloud-init will install `stress-ng`, write the workload script to `/opt/stress_n
 
 ```bash
 # Default is memory-heavy
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --cores=4 --memory=8Gi --vms=10
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --cores=4 --memory=8Gi --vms=10
 
 # CPU-heavy or balanced
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=10
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=10 --namespaces=2
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=10
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=balanced --vms=10 --namespaces=2
 ```
 
 ## Tuning: min/max and behavior
@@ -68,27 +68,27 @@ Override with `--env KEY=VAL` (repeat as needed):
 
 ```bash
 # Custom CPU and memory range
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env CPU_PERCENT_MIN=20 --env CPU_PERCENT_MAX=40 \
   --env MEM_PERCENT_MIN=50 --env MEM_PERCENT_MAX=70 \
   --cores=4 --memory=8Gi --vms=10
 
 # Short duration, high activity
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env DURATION_MIN=10 --env DURATION_MAX=60 --env CPU_ACTIVE_PROBABILITY=90 --env MEM_ACTIVE_PROBABILITY=90 --vms=10
 
 # Combine preset + overrides
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env WORKLOAD_TYPE=balanced \
   --env CPU_PERCENT_MIN=50 --env CPU_PERCENT_MAX=90 --env CPU_ACTIVE_PROBABILITY=75 --env MEM_ACTIVE_PROBABILITY=75 \
   --cores=4 --memory=8Gi --vms=10 --namespaces=2
 
 # CPU and memory out of sync: CPU active in ~70% of cycles, memory in ~40%
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env CPU_ACTIVE_PROBABILITY=70 --env MEM_ACTIVE_PROBABILITY=40 --vms=10
 
 # Custom stress-ng options: allocate RAM only (--vm-hang 0 = no CPU thrash). All tunables (duration, mem_to_use, etc.) still apply.
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env 'STRESS_NG_CUSTOM_OPTS=--vm $MEM_WORKERS --vm-bytes ${mem_to_use}M --vm-hang 0' --vms=5
 ```
 
@@ -130,7 +130,7 @@ For contributors and users who want to understand or extend the workload.
 
 ### End-to-end flow
 
-1. User runs vstorm with `--cloudinit=workload/cloudinit-stress-ng-workload.yaml`.
+1. User runs vstorm with `--cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml`.
 2. vstorm reads the file, replaces `{VSTORM_GUEST_ENV}` with `--env` lines if present, base64-encodes, and injects into the cloud-init Secret template.
 3. A Secret is created per namespace; each VM references it via `cloudInitNoCloud.secretRef`.
 4. On first boot, the guest runs cloud-init (`write_files`, `runcmd`, `packages`).
@@ -153,7 +153,7 @@ For contributors and users who want to understand or extend the workload.
 
 ### Built-in workload structure
 
-[workload/cloudinit-stress-ng-workload.yaml](../workload/cloudinit-stress-ng-workload.yaml): script at `/opt/stress_ng_random_vm.sh`, systemd unit at
+[workload/stress-ng/cloudinit-stress-ng-workload.yaml](../workload/stress-ng/cloudinit-stress-ng-workload.yaml): script at `/opt/stress_ng_random_vm.sh`, systemd unit at
 `/etc/systemd/system/stress-workload.service`, env from `--env` in `/etc/default/vstorm-guest-env`.
 The simulator runs in an infinite loop — each cycle it rolls independently for CPU and memory (`CPU_ACTIVE_PROBABILITY`, `MEM_ACTIVE_PROBABILITY`; both default to 50%), so you can have CPU-only, memory-only, both, or idle. When stress runs, it uses randomized CPU/memory levels for a random duration (`DURATION_MIN`–`DURATION_MAX`).
 
@@ -162,4 +162,4 @@ The simulator runs in an infinite loop — each cycle it rolls independently for
 ### References
 
 - [README.md](../README.md) — Custom cloud-init section
-- [workload/cloudinit-stress-ng-workload.yaml](../workload/cloudinit-stress-ng-workload.yaml) — built-in workload cloud-init
+- [workload/stress-ng/cloudinit-stress-ng-workload.yaml](../workload/stress-ng/cloudinit-stress-ng-workload.yaml) — built-in workload cloud-init

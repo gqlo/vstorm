@@ -28,7 +28,7 @@ setup_file() {
   export PATH="$mock_dir:$PATH"
 
   run bash "$VSTORM" -n --batch-id=cmb043 --datasource=rhel9 --storage-class=lvms-nvme-sc \
-    --no-snapshot --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --no-snapshot --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"
@@ -108,7 +108,7 @@ setup_file() {
   export PATH="$mock_dir:$PATH"
 
   run bash "$VSTORM" -n --batch-id=cmb046 --datasource=rhel9 --storage-class=lvms-nvme-sc \
-    --snapshot-class=my-snap --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --snapshot-class=my-snap --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --vms=2 --namespaces=1
 
   rm -rf "$mock_dir"

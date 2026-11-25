@@ -70,7 +70,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: vms-per-namespace + namespaces + cloudinit (Secret per ns)" {
   run bash "$VSTORM" -n --batch-id=cmb027 --datasource=rhel9 --vms-per-namespace=4 --namespaces=3 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- Total VMs = 4 * 3 = 12 ---
@@ -91,7 +91,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: positional args + no-snapshot + cloudinit" {
   run bash "$VSTORM" -n --batch-id=cmb028 --datasource=rhel9 --no-snapshot \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml 7 3
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml 7 3
   [ "$status" -eq 0 ]
 
   # --- 7 VMs across 3 namespaces ---

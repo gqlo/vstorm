@@ -1,0 +1,18 @@
+[Unit]
+Description=HammerDB TPROC-C workload (one-shot)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Schema build + rampup + duration far exceed systemd's default 90s
+# start timeout for a Type=oneshot unit; disable it so the benchmark
+# is not SIGTERM'd mid-run.
+TimeoutStartSec=0
+EnvironmentFile=-/etc/default/vstorm-guest-env
+ExecStart=/opt/hammerdb_workload.sh
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

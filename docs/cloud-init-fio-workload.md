@@ -6,12 +6,12 @@ Run a configurable fio storage I/O workload inside VMs at boot. For VM CPU and m
 
 | Goal | Command |
 |------|---------|
-| Default (randrw) on medium VMs | `vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --cores=4 --memory=8Gi --vms=10` |
-| Mixed random read/write | `vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randrw --vms=5` |
-| Sequential write, larger file | `vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=seqwrite --env FIO_SIZE=4G --vms=5` |
-| Custom block size and queue depth | `vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env FIO_BS=64k --env FIO_IODEPTH=64 --vms=10` |
-| Short time-based job for quicker feedback | `vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env FIO_TIME_BASED=1 --env FIO_RUNTIME=15 --vms=5` |
-| Dry-run to preview | `vstorm -n --cloudinit=workload/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randread --vms=5` |
+| Default (randrw) on medium VMs | `vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --cores=4 --memory=8Gi --vms=10` |
+| Mixed random read/write | `vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randrw --vms=5` |
+| Sequential write, larger file | `vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=seqwrite --env FIO_SIZE=4G --vms=5` |
+| Custom block size and queue depth | `vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env FIO_BS=64k --env FIO_IODEPTH=64 --vms=10` |
+| Short time-based job for quicker feedback | `vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env FIO_TIME_BASED=1 --env FIO_RUNTIME=15 --vms=5` |
+| Dry-run to preview | `vstorm -n --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randread --vms=5` |
 
 Default preset is **randrw** (no `--env` needed). Combine with any VM sizing.
 
@@ -28,7 +28,7 @@ Ensure the guest root disk is large enough for `FIO_SIZE` (default `1G`) plus th
 ## Run at boot
 
 ```bash
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --vms=10 --namespaces=2
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --vms=10 --namespaces=2
 ```
 
 Cloud-init will install `fio`, write the workload script to `/opt/fio_workload.sh`, and enable `fio-workload.service` (**one-shot**: runs a single fio job at boot, then exits; does not loop). I/O targets a file under `/root/data` on the guest root filesystem (exercises the VM PVC/DV backing store).
@@ -47,11 +47,11 @@ Pass `FIO_*` / `WORKLOAD_TYPE` once via `vstorm --env`. If `RESULT_SERVER_URL` i
 
 ```bash
 # Default is randrw
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --cores=4 --memory=8Gi --vms=10
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --cores=4 --memory=8Gi --vms=10
 
 # Write-only or sequential
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randwrite --vms=10
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=seqwrite --env FIO_SIZE=2G --vms=5
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=randwrite --vms=10
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env WORKLOAD_TYPE=seqwrite --env FIO_SIZE=2G --vms=5
 ```
 
 ## Tuning: env overrides
@@ -80,27 +80,27 @@ Override with `--env KEY=VAL` (repeat as needed):
 
 ```bash
 # Custom block size and depth
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --env FIO_BS=64k --env FIO_IODEPTH=64 \
   --cores=4 --memory=8Gi --vms=10
 
 # Larger working set, time-based short job
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --env WORKLOAD_TYPE=randrw --env FIO_SIZE=4G --env FIO_TIME_BASED=1 --env FIO_RUNTIME=30 --vms=5
 
 # Custom fio options (script appends --time_based --runtime only when FIO_TIME_BASED=1)
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --env 'FIO_CUSTOM_OPTS=--name=custom --filename=/root/data/custom.dat --rw=randread --bs=4k --iodepth=16 --size=512M --direct=1 --ioengine=libaio' \
   --vms=5
 
 # Collect: set FIO_* once, run one job, POST result to collector
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --env FIO_SIZE=1G --env WORKLOAD_TYPE=randrw \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
   --cores=4 --memory=8Gi --vms=10 --wait
 
 # Same with an explicit 50Gi data disk (omit --data-disk-size for none)
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --data-disk-size=50Gi \
   --env FIO_SIZE=10G --env WORKLOAD_TYPE=randrw \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
@@ -147,7 +147,7 @@ For contributors and users who want to understand or extend the workload.
 
 ### End-to-end flow
 
-1. User runs vstorm with `--cloudinit=workload/cloudinit-fio-workload.yaml`.
+1. User runs vstorm with `--cloudinit=workload/fio/cloudinit-fio-workload.yaml`.
 2. vstorm reads the file, replaces `{VSTORM_GUEST_ENV}` with `--env` lines if present, base64-encodes, and injects into the cloud-init Secret template.
 3. A Secret is created per namespace; each VM references it via `cloudInitNoCloud.secretRef`.
 4. On first boot, the guest runs cloud-init (`write_files`, `runcmd`, `packages`).
@@ -170,7 +170,7 @@ For contributors and users who want to understand or extend the workload.
 
 ### Built-in workload structure
 
-[workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml): script at `/opt/fio_workload.sh`, systemd unit (`Type=oneshot`, `Restart=no`) at
+[workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml): script at `/opt/fio_workload.sh`, systemd unit (`Type=oneshot`, `Restart=no`) at
 `/etc/systemd/system/fio-workload.service`, env from `--env` in `/etc/default/vstorm-guest-env`.
 Runs **one** fio job against a file under `FIO_DIRECTORY` (default `/root/data`). By default (`FIO_TIME_BASED=0`) there is no `--time_based`/`--runtime`; the job runs until `--size` completes. Set `FIO_TIME_BASED=1` to add `--time_based --runtime=${FIO_RUNTIME}` (default `60`s). Then the service exits.
 **Deployment**: Via `--cloudinit` (recommended), or set env with `--env KEY=VAL`; or copy and run the script standalone inside a VM (`scp` + `ssh`).
@@ -182,6 +182,6 @@ To collect the one result after the job finishes and browse batches on the colle
 ### References
 
 - [README.md](../README.md) — Custom cloud-init section
-- [workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml) — built-in workload cloud-init
+- [workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml) — built-in workload cloud-init
 - [cloud-init and stress-ng workload](cloud-init-stress-ng-workload.md) — sibling CPU/memory workload
 - [workload result sync and dashboard](workload-result-sync-and-dashboard.md) — result push + collector/dashboard

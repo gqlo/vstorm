@@ -2,7 +2,7 @@
 
 Design for capturing guest workload results (initially fio), syncing host-side vstorm **manifests** (run inventory), and browsing collected data in a simple web dashboard.
 
-Related: [cloud-init and fio workload](cloud-init-fio-workload.md), [logging and batch manifests](logging.md). Collector: [`monitoring/data-collector/`](../monitoring/data-collector/). First guest integration: [`workload/cloudinit-fio-workload.yaml`](../workload/cloudinit-fio-workload.yaml).
+Related: [cloud-init and fio workload](cloud-init-fio-workload.md), [logging and batch manifests](logging.md). Collector: [`monitoring/data-collector/`](../monitoring/data-collector/). First guest integration: [`workload/fio/cloudinit-fio-workload.yaml`](../workload/fio/cloudinit-fio-workload.yaml).
 
 ## Simple path (recommended)
 
@@ -17,7 +17,7 @@ python3 monitoring/data-collector/serve.py --listen 0.0.0.0:8080 --data-dir ./da
 # Open http://<host>:8080/
 
 # Terminal B — fio params at create; one job per VM; POST once
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml \
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml \
   --env FIO_SIZE=1G \
   --env WORKLOAD_TYPE=randrw \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
@@ -207,8 +207,8 @@ Shared across **all** workload cloud-inits via `vstorm-boot-timestamp.service` (
   `vm_ready_s` (boot−dv created). Blank when either endpoint is missing. PVC bound time
   comes from the owning DV `Bound=True` condition (`lastTransitionTime`).
 
-Standalone sources: [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh)
-(the guest agent) and [`workload/vstorm-boot-timestamp.service`](../workload/vstorm-boot-timestamp.service)
+Standalone sources: [`workload/shared/vstorm-boot-timestamp.sh`](../workload/shared/vstorm-boot-timestamp.sh)
+(the guest agent) and [`workload/shared/vstorm-boot-timestamp.service`](../workload/shared/vstorm-boot-timestamp.service)
 (its systemd unit). Single source of truth: each profile carries `{VSTORM_BOOT_SCRIPT}` and
 `{VSTORM_BOOT_SERVICE}` placeholders in its `write_files` block that vstorm splices these files
 into at runtime — covered by bats.
@@ -284,7 +284,7 @@ readability (a real POST includes every VM’s per-VM timestamps).
   ],
   "cores": 4,
   "memory": "8Gi",
-  "cloudinit": "workload/cloudinit-fio-workload.yaml",
+  "cloudinit": "workload/fio/cloudinit-fio-workload.yaml",
   "guest_env": {
     "FIO_SIZE": "1G",
     "RESULT_SERVER_URL": "http://host:8080/v1/results",
@@ -293,7 +293,7 @@ readability (a real POST includes every VM’s per-VM timestamps).
   },
   "storage_class": "ocs-storagecluster-ceph-rbd",
   "volume_mode": "Block",
-  "cmdline": ["vstorm", "--cloudinit=workload/cloudinit-fio-workload.yaml", "--cores=4", "--memory=8Gi", "--vms=10"],
+  "cmdline": ["vstorm", "--cloudinit=workload/fio/cloudinit-fio-workload.yaml", "--cores=4", "--memory=8Gi", "--vms=10"],
   "log_path": "logs/8a494b-2026-07-22T05:48:20.log",
   "log_text": "…truncated host log (up to 64 KiB)…",
   "cluster": {
@@ -589,9 +589,9 @@ See **[Simple path (recommended)](#simple-path-recommended)** above. Cap jobs wi
 | Area | Status |
 |------|--------|
 | [`vstorm`](../vstorm) | POSTs `record_type: "manifest"` when `RESULT_SERVER_URL` is in `--env`; auto-injects `VSTORM_BATCH_ID`; optional truncated `log_text` |
-| [`workload/cloudinit-fio-workload.yaml`](../workload/cloudinit-fio-workload.yaml) | Fio one-shot; result POST; reads shared boot timestamp |
-| [`workload/vstorm-boot-timestamp.sh`](../workload/vstorm-boot-timestamp.sh) | Shared boot file + optional boot heartbeat POST (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SCRIPT}`) |
-| [`workload/vstorm-boot-timestamp.service`](../workload/vstorm-boot-timestamp.service) | systemd unit that runs the boot agent (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SERVICE}`) |
+| [`workload/fio/cloudinit-fio-workload.yaml`](../workload/fio/cloudinit-fio-workload.yaml) | Fio one-shot; result POST; reads shared boot timestamp |
+| [`workload/shared/vstorm-boot-timestamp.sh`](../workload/shared/vstorm-boot-timestamp.sh) | Shared boot file + optional boot heartbeat POST (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SCRIPT}`) |
+| [`workload/shared/vstorm-boot-timestamp.service`](../workload/shared/vstorm-boot-timestamp.service) | systemd unit that runs the boot agent (spliced into all cloud-inits at runtime via `{VSTORM_BOOT_SERVICE}`) |
 | `monitoring/data-collector/serve.py` | Ingest; policy GET/PUT/fan-out; remaining consume on cycle ingest; VM status rollups; ISO filenames |
 | [`monitoring/data-collector/static/`](../monitoring/data-collector/static/) | Browse batches / VMs / payloads; helpers in `dashboard-lib.js` |
 | [`docs/cloud-init-fio-workload.md`](cloud-init-fio-workload.md) | Env table includes `RESULT_SERVER_*` / `WORKLOAD_RUN_*` |
@@ -601,6 +601,6 @@ See **[Simple path (recommended)](#simple-path-recommended)** above. Cap jobs wi
 
 - [cloud-init and fio workload](cloud-init-fio-workload.md)
 - [logging and batch manifests](logging.md)
-- [workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml)
+- [workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml)
 - [README.md](../README.md) — Cloud-init and `--env`
 - [monitoring/](../monitoring/README.md) — cluster Prom/Grafana; guest collector under `monitoring/data-collector/`

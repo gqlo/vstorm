@@ -492,7 +492,7 @@ SLOWMOCK
 # ---------------------------------------------------------------
 @test "OPT: --env injects KEY=VAL into cloud-init Secret userdata" {
   run bash "$VSTORM" -n --batch-id=env01 --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --env FOO=bar --env=BAZ=qux
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: Secret"* ]]
@@ -511,7 +511,7 @@ SLOWMOCK
 # ---------------------------------------------------------------
 @test "OPT: --env space-separated form accepted" {
   run bash "$VSTORM" -n --batch-id=env02 --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --env X=1 --env Y=2
   [ "$status" -eq 0 ]
   userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
@@ -535,7 +535,7 @@ SLOWMOCK
 # ---------------------------------------------------------------
 @test "OPT: no --env replaces placeholder with comment in cloud-init userdata when present in file" {
   run bash "$VSTORM" -n --batch-id=env04 --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
   userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
   decoded=$(echo "$userdata_b64" | base64 -d 2>/dev/null)
@@ -551,7 +551,7 @@ SLOWMOCK
 # ---------------------------------------------------------------
 @test "OPT: --env RESULT_SERVER_URL overrides default collector URL" {
   run bash "$VSTORM" -n --batch-id=env04b --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-default.yaml \
+    --cloudinit=workload/shared/cloudinit-default.yaml \
     --env RESULT_SERVER_URL=http://example.test:9999/v1/results
   [ "$status" -eq 0 ]
   userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
@@ -562,7 +562,7 @@ SLOWMOCK
 
 @test "OPT: --env RESULT_SERVER_URL= empty disables default collector URL" {
   run bash "$VSTORM" -n --batch-id=env04c --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-default.yaml \
+    --cloudinit=workload/shared/cloudinit-default.yaml \
     --env RESULT_SERVER_URL=
   [ "$status" -eq 0 ]
   userdata_b64=$(echo "$output" | grep "userdata:" | head -1 | sed 's/.*userdata: *//')
@@ -589,7 +589,7 @@ SLOWMOCK
 # ---------------------------------------------------------------
 @test "OPT: cloudinit-dirty-mem-pages.yaml with --env DIRTY_RATE_FRACTION" {
   run bash "$VSTORM" -n --batch-id=env05 --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-dirty-mem-pages.yaml \
+    --cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml \
     --env DIRTY_RATE_FRACTION=0.4
   [ "$status" -eq 0 ]
   [[ "$output" == *"kind: Secret"* ]]

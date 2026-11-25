@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
 # Test the stress-ng workload script (syntax, startup output, branch coverage).
-# The standalone workload/stress_ng_random_vm.sh is the source of truth; vstorm
+# The standalone workload/stress-ng/stress_ng_random_vm.sh is the source of truth; vstorm
 # splices it into the cloud-init YAML at runtime via {STRESS_NG_WORKLOAD_SCRIPT}.
 
 load 'helpers'
 
-YAML="workload/cloudinit-stress-ng-workload.yaml"
-SCRIPT="workload/stress_ng_random_vm.sh"
+YAML="workload/stress-ng/cloudinit-stress-ng-workload.yaml"
+SCRIPT="workload/stress-ng/stress_ng_random_vm.sh"
 
 # The embedded script installs stress-ng when missing, then prints startup.
 # CI/minimal runners often have no stress-ng and no working package install;
@@ -58,7 +58,7 @@ _extract_stress_script() {
 @test "WL: vstorm splices script and service into cloud-init userdata byte-for-byte" {
     assert_spliced_matches "$YAML" "path: /opt/stress_ng_random_vm.sh" "$SCRIPT"
     assert_spliced_matches "$YAML" "path: /etc/systemd/system/stress-workload.service" \
-        "workload/stress-workload.service"
+        "workload/stress-ng/stress-workload.service"
 }
 
 # ---------------------------------------------------------------

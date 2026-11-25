@@ -101,7 +101,7 @@ def main() -> int:
             "vms": b["vms"],
             "cores": 4,
             "memory": "8Gi",
-            "cloudinit": "workload/cloudinit-fio-workload.yaml",
+            "cloudinit": "workload/fio/cloudinit-fio-workload.yaml",
             "guest_env": {
                 "FIO_SIZE": "1G",
                 "RESULT_SERVER_URL": args.url,
@@ -112,7 +112,7 @@ def main() -> int:
             "volume_mode": "Block",
             "cmdline": [
                 "vstorm",
-                "--cloudinit=workload/cloudinit-fio-workload.yaml",
+                "--cloudinit=workload/fio/cloudinit-fio-workload.yaml",
                 "--cores=4",
                 "--memory=8Gi",
                 f"--vms={len(b['vms'])}",

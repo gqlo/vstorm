@@ -157,12 +157,12 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# QS-4: ./vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
+# QS-4: ./vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 #   Custom cloud-init workload
 # ---------------------------------------------------------------
 @test "QS: custom cloud-init stress-ng workload, 10 VMs across 2 namespaces" {
   run bash "$VSTORM" -n --batch-id=qs0004 --datasource=rhel9 --vms=10 --namespaces=2 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- DataSource mode (default) ---
@@ -193,12 +193,12 @@ setup_file() {
 }
 
 # ---------------------------------------------------------------
-# QS-4b: ./vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=1
+# QS-4b: ./vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=1
 #   Custom cloud-init stress-ng workload (same file, different run)
 # ---------------------------------------------------------------
 @test "QS: custom cloud-init stress-ng workload, 5 VMs in 1 namespace" {
   run bash "$VSTORM" -n --batch-id=qs004b --datasource=rhel9 --vms=5 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
   [[ "$output" == *"sourceRef"* ]]
   [[ "$output" == *"cloudInitNoCloud"* ]]

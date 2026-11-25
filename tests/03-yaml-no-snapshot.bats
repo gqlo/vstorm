@@ -141,7 +141,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "Cloud-init Secret YAML is well-formed" {
   run bash "$VSTORM" -n --batch-id=yaml07 --datasource=rhel9 --vms=1 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   [[ "$output" == *"apiVersion: v1"* ]]
@@ -232,7 +232,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "no-snapshot: works with custom cloud-init" {
   run bash "$VSTORM" -n --batch-id=nosn04 --datasource=rhel9 --no-snapshot --vms=2 --namespaces=1 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml
   [ "$status" -eq 0 ]
 
   # --- Cloud-init Secret created ---
