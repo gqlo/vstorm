@@ -1,13 +1,13 @@
 # Cloud-init and HammerDB workload
 
-> **Status: design plan / proposal.** This is a guide for *adding* a HammerDB
-> workload. The run scripts and unit under `workload/hammerdb/` exist, but the
-> `workload/hammerdb/cloudinit-hammerdb-workload.yaml` profile, the `{HAMMERDB_*}` splice
-> wiring in `vstorm`, and the result-sync integration do **not** exist yet — this
-> is a skeleton to build from, not a shipped, tested workload. The `vstorm`
-> commands throughout assume you have first created the profile and wired it up
-> (see [The cloud-init profile](#the-cloud-init-profile)); they will fail until
-> you do.
+> **Status: implemented.** The run scripts and unit under `workload/hammerdb/`,
+> the `workload/hammerdb/cloudinit-hammerdb-workload.yaml` profile, the
+> `{HAMMERDB_*}` splice wiring in `vstorm`, and the guest-side result-sync (JSON
+> emission + collector POST) all ship. Targets **HammerDB 6.0+** (the modern
+> `jobs` interface; `runtimer`/`waittocomplete` are deprecated and unused). The
+> one piece still open is **first-class dashboard rendering of NOPM/TPM**: the
+> collector stores the full result JSON, but does not yet chart HammerDB metrics
+> the way it charts fio IOPS/bandwidth (see [Monitoring](#monitoring)).
 
 Run a [HammerDB](https://www.hammerdb.com/docs6.1/ch01s14.html#d0e755) TPROC-C
 (OLTP) database benchmark inside VMs at boot. This plan follows the same pattern
@@ -25,9 +25,6 @@ For VM CPU/memory options (`--cores`, `--memory`, etc.), see the main
 [README](../README.md#options).
 
 ## Quick start: example commands
-
-Once you have created `workload/hammerdb/cloudinit-hammerdb-workload.yaml` from
-[the skeleton below](#the-cloud-init-profile), these are the intended invocations:
 
 | Goal | Command |
 |------|---------|
@@ -77,14 +74,15 @@ and the workload script into the cloud-init Secret, which cloud-init writes to
 `/opt`, then enables `hammerdb-workload.service` (**one-shot**: init DB → build
 schema → run benchmark → exit). Pass `HDB_*` once via `vstorm --env`.
 
-**Result sync is not implemented in this skeleton.** The orchestration script
-below only writes NOPM/TPM to `/root/hammerdb-result.txt` and leaves a TODO where a
-collector POST would go. To push results to the dashboard, you must add a
-`report_result`/heartbeat implementation — mirror
-[`report_result` in workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml)
-and see [workload result sync and dashboard](workload-result-sync-and-dashboard.md).
-The `RESULT_SERVER_URL` / `VSTORM_*` rows below are the *intended* contract for
-that future work, not yet wired up.
+**Result sync emits JSON and POSTs it.** `run.tcl` exports the benchmark as a
+structured JSON report via the HammerDB 6.0+ `jobs` interface (`jobs format JSON`
+then `jobs <jobid> save`), and `hammerdb_workload.sh` wraps NOPM/TPM plus the raw
+report into vstorm's canonical payload (`workload_kind: "hammerdb"`) and POSTs it
+to `RESULT_SERVER_URL` with retry + a pending spool — mirroring
+[`report_result` in workload/fio/fio_workload.sh](../workload/fio/fio_workload.sh).
+It also still writes `/root/hammerdb-result.txt` for humans. See
+[workload result sync and dashboard](workload-result-sync-and-dashboard.md). Set
+`RESULT_SERVER_URL` via `--env` (vstorm auto-injects `VSTORM_BATCH_ID`).
 
 ## Tuning: env overrides
 
@@ -97,8 +95,8 @@ Override with `--env KEY=VAL` (repeat as needed):
 | `HDB_VU` | Virtual users (benchmark clients; default `4`) |
 | `HDB_RAMPUP` | Ramp-up minutes before measurement (default `2`) |
 | `HDB_DURATION` | Measured run minutes (default `5`) |
-| `RESULT_SERVER_URL` | *(planned, not implemented)* Collector results URL for a post-run POST |
-| `VSTORM_BATCH_ID` / `VSTORM_VM_NAME` | *(planned)* Auto-injected by vstorm for result join |
+| `RESULT_SERVER_URL` | Collector results URL for the post-run JSON POST |
+| `VSTORM_BATCH_ID` / `VSTORM_VM_NAME` | Auto-injected by vstorm for result join |
 
 ```bash
 # Larger schema and more virtual users
@@ -106,7 +104,7 @@ vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=50 --env HDB_VU=16 \
   --cores=8 --memory=16Gi --vms=5
 
-# Collect results to the dashboard collector (requires adding the POST — see above)
+# Collect results to the dashboard collector (JSON POST after the run)
 vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=20 --env HDB_VU=8 \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
@@ -115,62 +113,13 @@ vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml \
 
 ## The cloud-init profile
 
-Create `workload/hammerdb/cloudinit-hammerdb-workload.yaml`. The skeleton below mirrors the
-fio/stress-ng profiles — see
-[workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml)
-for the full result-sync boilerplate (`/etc/default/vstorm-guest-env`,
-`vstorm-boot-timestamp.service`) to copy verbatim.
-
-```yaml
-#cloud-config
-preserve_hostname: false
-ssh_pwauth: true
-disable_root: false
-chpasswd:
-  expire: false
-  users:
-    - name: root
-      password: password
-      type: text
-
-write_files:
-  # Guest env injected by `vstorm --env` (HDB_*, RESULT_SERVER_URL, ...)
-  - path: /etc/default/vstorm-guest-env
-    permissions: '0644'
-    content: |
-      {VSTORM_GUEST_ENV}
-
-  # TPROC-C schema build script — vstorm injects workload/hammerdb/build.tcl
-  - path: /opt/hammerdb/build.tcl
-    permissions: '0644'
-    content: |
-      {HAMMERDB_BUILD_TCL}
-
-  # TPROC-C timed run script — vstorm injects workload/hammerdb/run.tcl
-  - path: /opt/hammerdb/run.tcl
-    permissions: '0644'
-    content: |
-      {HAMMERDB_RUN_TCL}
-
-  # Orchestration — vstorm injects workload/hammerdb/hammerdb_workload.sh
-  - path: /opt/hammerdb_workload.sh
-    permissions: '0755'
-    content: |
-      {HAMMERDB_ORCHESTRATE_SH}
-
-  # systemd unit — vstorm injects workload/hammerdb/hammerdb-workload.service
-  - path: /etc/systemd/system/hammerdb-workload.service
-    permissions: '0644'
-    content: |
-      {HAMMERDB_SERVICE_UNIT}
-
-runcmd:
-  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-  - systemctl restart sshd 2>/dev/null || systemctl restart ssh
-  - ["systemctl", "daemon-reload"]
-  - ["systemctl", "enable", "--now", "hammerdb-workload.service"]
-```
+The profile is
+[workload/hammerdb/cloudinit-hammerdb-workload.yaml](../workload/hammerdb/cloudinit-hammerdb-workload.yaml).
+It mirrors the fio/stress-ng profiles: a slim `#cloud-config` that carries only the
+`{VSTORM_GUEST_ENV}` env block and the `{HAMMERDB_*}` / `{VSTORM_BOOT_*}`
+placeholders (each alone on its `content: |` line), which vstorm fills from the
+standalone files at run time. `runcmd` enables `vstorm-boot-timestamp.service` then
+`hammerdb-workload.service`.
 
 ### The injected scripts (`workload/hammerdb/`)
 
@@ -239,23 +188,22 @@ with `--dv-url` / `--datasource`.
 
 The run scripts stay the single source of truth under `workload/hammerdb/`, and
 vstorm substitutes each one into the cloud-init **Secret** at run time — no custom
-image step for them, and no new object type. **The HammerDB profile is not
-implemented yet**, but the file-splicing machinery it needs already exists: vstorm
-splices workload files (e.g. `{FIO_WORKLOAD_SCRIPT}`, `{VSTORM_BOOT_SCRIPT}`) via a
-placeholder→file map alongside `{VSTORM_GUEST_ENV}`. Adding HammerDB is a matter of
-adding its `{HAMMERDB_*}` entries to that map and the profile.
+image step for them, and no new object type. vstorm splices workload files (e.g.
+`{FIO_WORKLOAD_SCRIPT}`, `{VSTORM_BOOT_SCRIPT}`) via a placeholder→file map
+(`_ci_file_splices` in `vstorm`) alongside `{VSTORM_GUEST_ENV}`; the HammerDB
+entries are registered there.
 
 **How it works.** vstorm splices the workload files and `{VSTORM_GUEST_ENV}` into
-the userdata before base64-encoding it into the cloud-init Secret. Add the HammerDB
-placeholders the same way — each alone on an indented line — mapped to files vstorm
-fills in at run time, reusing the existing indent/substitution machinery:
+the userdata before base64-encoding it into the cloud-init Secret. Each HammerDB
+placeholder sits alone on an indented line and maps to a file vstorm fills in at run
+time, reusing the existing indent/substitution machinery:
 
 | Placeholder | Filled from |
 |-------------|-------------|
 | `{HAMMERDB_BUILD_TCL}` | `workload/hammerdb/build.tcl` |
 | `{HAMMERDB_RUN_TCL}` | `workload/hammerdb/run.tcl` |
-| `{HAMMERDB_ORCHESTRATE_SH}` | `workload/hammerdb/hammerdb_workload.sh` |
-| `{HAMMERDB_SERVICE_UNIT}` | `workload/hammerdb/hammerdb-workload.service` |
+| `{HAMMERDB_WORKLOAD_SCRIPT}` | `workload/hammerdb/hammerdb_workload.sh` |
+| `{HAMMERDB_WORKLOAD_SERVICE}` | `workload/hammerdb/hammerdb-workload.service` |
 
 ```yaml
 write_files:
@@ -293,8 +241,15 @@ Inside a VM (via `virtctl console` or SSH):
 ```bash
 systemctl status hammerdb-workload.service
 journalctl -u hammerdb-workload.service -f
-cat /root/hammerdb-result.txt     # NOPM / TPM once the run completes
+cat /root/hammerdb-result.txt              # NOPM / TPM once the run completes
+ls /root/hammerdb-results/                 # hdb_<jobid>.json (jobs save) + payloads
+cat /root/hammerdb-results/tproc-c-payload.json   # canonical result POSTed to the collector
 ```
+
+When `RESULT_SERVER_URL` is set, the collector stores the full JSON payload (with
+`nopm`, `tpm`, and the raw `hammerdb_report`) for each run. Charting NOPM/TPM in the
+dashboard the way fio IOPS/bandwidth is charted is a follow-up — the data is
+captured, it is just not yet rendered as HammerDB-specific metrics.
 
 ---
 

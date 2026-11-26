@@ -12,7 +12,14 @@ loadscript
 vuset vu $env(HDB_VU)
 vuset logtotemp 1
 vucreate
-vurun
-runtimer [expr {($env(HDB_RAMPUP) + $env(HDB_DURATION)) * 60 + 30}]
+# HammerDB 6.0+: vurun blocks until all virtual users finish, so the deprecated
+# runtimer/waittocomplete commands are no longer needed. Capture the jobid it
+# returns so the result can be exported as structured JSON.
+set jobid [vurun]
+# Emit the full job report as JSON so hammerdb_workload.sh can ship a structured
+# result. "jobs save" writes hdb_<jobid>.json under the HammerDB TMP dir and
+# prints "Saved job report JSON to <path>", which the workload script parses.
+jobs format JSON
+jobs $jobid save
 vudestroy
 quit

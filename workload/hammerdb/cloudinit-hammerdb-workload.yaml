@@ -1,0 +1,58 @@
+#cloud-config
+preserve_hostname: false
+ssh_pwauth: true
+disable_root: false
+chpasswd:
+  expire: false
+  users:
+    - name: root
+      password: password
+      type: text
+
+write_files:
+  # TPROC-C schema build script — vstorm splices in workload/hammerdb/build.tcl
+  - path: /opt/hammerdb/build.tcl
+    permissions: '0644'
+    content: |
+      {HAMMERDB_BUILD_TCL}
+
+  # TPROC-C timed run script — vstorm splices in workload/hammerdb/run.tcl
+  - path: /opt/hammerdb/run.tcl
+    permissions: '0644'
+    content: |
+      {HAMMERDB_RUN_TCL}
+
+  # Orchestration — vstorm splices in workload/hammerdb/hammerdb_workload.sh
+  - path: /opt/hammerdb_workload.sh
+    permissions: '0755'
+    content: |
+      {HAMMERDB_WORKLOAD_SCRIPT}
+
+  - path: /opt/vstorm-boot-timestamp.sh
+    permissions: '0755'
+    content: |
+      {VSTORM_BOOT_SCRIPT}
+
+  - path: /etc/systemd/system/vstorm-boot-timestamp.service
+    permissions: '0644'
+    content: |
+      {VSTORM_BOOT_SERVICE}
+
+  # Guest env injected by `vstorm --env` (HDB_*, RESULT_SERVER_URL, ...)
+  - path: /etc/default/vstorm-guest-env
+    permissions: '0644'
+    content: |
+      {VSTORM_GUEST_ENV}
+
+  - path: /etc/systemd/system/hammerdb-workload.service
+    permissions: '0644'
+    content: |
+      {HAMMERDB_WORKLOAD_SERVICE}
+
+runcmd:
+  - sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+  - sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+  - systemctl restart sshd 2>/dev/null || systemctl restart ssh
+  - ["systemctl", "daemon-reload"]
+  - ["systemctl", "enable", "--now", "vstorm-boot-timestamp.service"]
+  - ["systemctl", "enable", "--now", "hammerdb-workload.service"]

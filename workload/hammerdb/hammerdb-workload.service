@@ -1,7 +1,7 @@
 [Unit]
 Description=HammerDB TPROC-C workload (one-shot)
-After=network-online.target postgresql.service
-Wants=network-online.target
+After=network-online.target postgresql.service vstorm-boot-timestamp.service
+Wants=network-online.target vstorm-boot-timestamp.service
 
 [Service]
 Type=oneshot

@@ -2015,6 +2015,10 @@ firmware:
 	    [FIO_WORKLOAD_SERVICE]="fio/fio-workload.service"
 	    [STRESS_NG_WORKLOAD_SCRIPT]="stress-ng/stress_ng_random_vm.sh"
 	    [STRESS_NG_WORKLOAD_SERVICE]="stress-ng/stress-workload.service"
+	    [HAMMERDB_BUILD_TCL]="hammerdb/build.tcl"
+	    [HAMMERDB_RUN_TCL]="hammerdb/run.tcl"
+	    [HAMMERDB_WORKLOAD_SCRIPT]="hammerdb/hammerdb_workload.sh"
+	    [HAMMERDB_WORKLOAD_SERVICE]="hammerdb/hammerdb-workload.service"
 	    [DIRTY_MEM_SOURCE]="dirty-mem/dirty-mem-pages.c"
 	    [DIRTY_MEM_WORKLOAD_SERVICE]="dirty-mem/dirty-mem-pages.service"
 	)

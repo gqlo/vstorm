@@ -183,6 +183,7 @@ PY
     for y in workload/fio/cloudinit-fio-workload.yaml \
              workload/stress-ng/cloudinit-stress-ng-workload.yaml \
              workload/dirty-mem/cloudinit-dirty-mem-pages.yaml \
+             workload/hammerdb/cloudinit-hammerdb-workload.yaml \
              workload/shared/cloudinit-default.yaml; do
         grep -q 'path: /opt/vstorm-boot-timestamp.sh' "$y"
         grep -q 'path: /etc/systemd/system/vstorm-boot-timestamp.service' "$y"

@@ -10,6 +10,8 @@ diset tpcc pg_dbase tpcc
 diset tpcc pg_count_ware $env(HDB_WAREHOUSES)
 # Build users must not exceed the warehouse count.
 diset tpcc pg_num_vu [expr {min($env(HDB_VU), $env(HDB_WAREHOUSES))}]
+# HammerDB 6.0+: buildschema blocks until the schema build completes (it reports
+# "ALL VIRTUAL USERS COMPLETE" at the end), so the deprecated waittocomplete is no
+# longer needed.
 buildschema
-waittocomplete
 quit
