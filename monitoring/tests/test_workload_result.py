@@ -93,6 +93,47 @@ def _fio_payload(
     }
 
 
+def _hdb_payload(
+    *,
+    batch_id: str = "h1",
+    vm: str = "vm1",
+    cycle: int = 1,
+    nopm: float = 12000.0,
+    tpm: float = 27000.0,
+    hdb_rc: int = 0,
+    status: str = "ok",
+) -> dict:
+    return {
+        "schema_version": 1,
+        "record_type": "result",
+        "source": "guest",
+        "workload_kind": "hammerdb",
+        "status": status,
+        "error_message": None if status == "ok" else "hammerdb failed",
+        "hdb_start": "2026-07-22T05:50:50Z",
+        "hdb_stop": "2026-07-22T05:52:00Z",
+        "started_at": "2026-07-22T05:50:50Z",
+        "stopped_at": "2026-07-22T05:52:00Z",
+        "reported_at": "2026-07-22T05:52:03Z",
+        "boot_timestamp": "2026-07-22T05:50:25Z",
+        "hostname": vm,
+        "batch_id": batch_id,
+        "vm_name": vm,
+        "cycle": cycle,
+        "cpu_count": 4,
+        "mem_total_kb": 8000000,
+        "hdb_rc": hdb_rc,
+        "nopm": nopm,
+        "tpm": tpm,
+        "hammerdb_report": {"jobid": "abc", "tcount": 4},
+        "workload": {
+            "HDB_DB": "pg",
+            "HDB_WAREHOUSES": "4",
+            "HDB_VU": "4",
+        },
+    }
+
+
 class TestHelpers(unittest.TestCase):
     def test_normalize_record_type_aliases(self) -> None:
         self.assertEqual(wr._normalize_record_type("batch"), "manifest")
@@ -129,6 +170,63 @@ class TestHelpers(unittest.TestCase):
 
     def test_extract_fio_metrics_missing(self) -> None:
         self.assertEqual(wr.extract_fio_metrics({}), (None, None, None))
+
+    def test_metric_names_for(self) -> None:
+        self.assertEqual(wr.metric_names_for("fio"), ("iops", "bw_bytes", "lat_ns"))
+        self.assertEqual(wr.metric_names_for("hammerdb"), ("tpm", "nopm"))
+        self.assertEqual(wr.metric_names_for("stress-ng"), ())
+        self.assertEqual(wr.metric_names_for(None), ())
+
+    def test_extract_metrics_fio(self) -> None:
+        self.assertEqual(
+            wr.extract_metrics("fio", _fio_payload()),
+            {"iops": 1000.0, "bw_bytes": 4096000.0, "lat_ns": 1500.0},
+        )
+
+    def test_extract_metrics_hammerdb(self) -> None:
+        self.assertEqual(
+            wr.extract_metrics("hammerdb", _hdb_payload()),
+            {"tpm": 27000.0, "nopm": 12000.0},
+        )
+
+    def test_extract_metrics_hammerdb_skips_missing(self) -> None:
+        self.assertEqual(
+            wr.extract_metrics("hammerdb", {"tpm": 100}), {"tpm": 100.0}
+        )
+        self.assertEqual(
+            wr.extract_metrics("hammerdb", {"tpm": None, "nopm": "bad"}), {}
+        )
+
+    def test_extract_metrics_unknown_workload(self) -> None:
+        self.assertEqual(wr.extract_metrics("stress-ng", _fio_payload()), {})
+        self.assertEqual(wr.extract_metrics(None, _fio_payload()), {})
+
+    def test_extract_rc(self) -> None:
+        # generic rc wins over workload-specific keys
+        self.assertEqual(wr.extract_rc("fio", {"rc": 2, "fio_rc": 0}), 2)
+        self.assertEqual(wr.extract_rc("fio", _fio_payload(fio_rc=1)), 1)
+        self.assertEqual(wr.extract_rc("hammerdb", _hdb_payload(hdb_rc=3)), 3)
+        # unknown workload still honors generic rc / legacy fio_rc fallback
+        self.assertEqual(wr.extract_rc("stress-ng", {"rc": 5}), 5)
+        self.assertEqual(wr.extract_rc("stress-ng", {"fio_rc": 7}), 7)
+        self.assertIsNone(wr.extract_rc("hammerdb", {"nopm": 1}))
+
+    def test_aggregate_metric_bags(self) -> None:
+        bags = [
+            {"tpm": 100.0, "nopm": 40.0},
+            {"tpm": 200.0, "nopm": 60.0},
+            {"tpm": 300.0},  # missing nopm is skipped for nopm only
+        ]
+        agg = wr.aggregate_metric_bags(bags)
+        self.assertEqual(agg["tpm"]["avg"], 200.0)
+        self.assertEqual(agg["tpm"]["p50"], 200.0)
+        self.assertEqual(agg["nopm"]["avg"], 50.0)
+        # a metric with no samples is omitted entirely
+        self.assertNotIn("iops", agg)
+
+    def test_aggregate_metric_bags_empty(self) -> None:
+        self.assertEqual(wr.aggregate_metric_bags([]), {})
+        self.assertEqual(wr.aggregate_metric_bags([{}]), {})
 
     def test_workload_fingerprint(self) -> None:
         self.assertEqual(wr.workload_fingerprint(_fio_payload()), "randrw/1G/4k")
@@ -1851,6 +1949,101 @@ class TestHTTPApi(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Access-Control-Allow-Origin"), origin)
+
+
+class TestGenericMetrics(unittest.TestCase):
+    """Generic metric model: per-workload metric bag, rc, and batch aggregation."""
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.store = wr.Store(Path(self._td.name))
+
+    def tearDown(self) -> None:
+        self.store.close()
+        self._td.cleanup()
+
+    def _result_row(self, batch_id: str) -> dict:
+        return self.store._conn.execute(
+            "SELECT metrics_json, rc, iops, bw_bytes, lat_ns FROM results "
+            "WHERE batch_id = ? AND record_type = 'result' ORDER BY cycle LIMIT 1",
+            (batch_id,),
+        ).fetchone()
+
+    def _batch_metrics(self, batch_id: str) -> dict:
+        row = self.store._conn.execute(
+            "SELECT batch_metrics_json FROM batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+        return json.loads(row["batch_metrics_json"]) if row and row["batch_metrics_json"] else {}
+
+    def test_ingest_fio_populates_metrics_json_and_rc(self) -> None:
+        self.store.ingest(_fio_payload(batch_id="gf1", fio_rc=0))
+        row = self._result_row("gf1")
+        self.assertEqual(
+            json.loads(row["metrics_json"]),
+            {"iops": 1000.0, "bw_bytes": 4096000.0, "lat_ns": 1500.0},
+        )
+        self.assertEqual(row["rc"], 0)
+        # legacy columns stay populated for back-compat
+        self.assertEqual(row["iops"], 1000.0)
+
+    def test_ingest_hammerdb_populates_metrics_json_and_rc(self) -> None:
+        self.store.ingest(_hdb_payload(batch_id="gh1", hdb_rc=0))
+        row = self._result_row("gh1")
+        self.assertEqual(json.loads(row["metrics_json"]), {"tpm": 27000.0, "nopm": 12000.0})
+        self.assertEqual(row["rc"], 0)
+        # hammerdb has no fio columns
+        self.assertIsNone(row["iops"])
+
+    def test_unknown_workload_ingests_with_empty_metrics(self) -> None:
+        self.store.ingest(
+            {
+                "schema_version": 1,
+                "record_type": "result",
+                "source": "guest",
+                "workload_kind": "stress-ng",
+                "status": "ok",
+                "batch_id": "gu1",
+                "vm_name": "vm1",
+                "cycle": 1,
+            }
+        )
+        row = self._result_row("gu1")
+        self.assertIsNone(row["metrics_json"])
+        self.assertEqual(self._batch_metrics("gu1"), {})
+
+    def test_batch_aggregation_hammerdb(self) -> None:
+        self.store.ingest(_hdb_payload(batch_id="gh2", vm="vm1", cycle=1, tpm=100.0, nopm=40.0))
+        self.store.ingest(_hdb_payload(batch_id="gh2", vm="vm2", cycle=1, tpm=300.0, nopm=60.0))
+        agg = self._batch_metrics("gh2")
+        self.assertEqual(agg["tpm"]["avg"], 200.0)
+        self.assertEqual(agg["nopm"]["avg"], 50.0)
+        self.assertNotIn("iops", agg)
+
+    def test_batch_aggregation_fio(self) -> None:
+        self.store.ingest(_fio_payload(batch_id="gf2", vm="vm1", cycle=1, iops=1000.0))
+        self.store.ingest(_fio_payload(batch_id="gf2", vm="vm2", cycle=1, iops=3000.0))
+        agg = self._batch_metrics("gf2")
+        self.assertEqual(agg["iops"]["avg"], 2000.0)
+
+    def test_metrics_json_backfill_from_legacy_columns(self) -> None:
+        # Simulate a pre-existing row with only legacy fio columns set.
+        self.store._conn.execute(
+            """
+            INSERT INTO results (result_id, batch_id, record_type, iops, bw_bytes, lat_ns,
+                                 metrics_json, file_path, created_at)
+            VALUES ('legacy1', 'gb1', 'result', 500.0, 2048.0, 900.0, NULL, 'x.json', 0)
+            """
+        )
+        self.store._conn.commit()
+        self.store._backfill_results_metrics_json()
+        row = self.store._conn.execute(
+            "SELECT metrics_json FROM results WHERE result_id = 'legacy1'"
+        ).fetchone()
+        self.assertEqual(
+            json.loads(row["metrics_json"]),
+            {"iops": 500.0, "bw_bytes": 2048.0, "lat_ns": 900.0},
+        )
 
 
 if __name__ == "__main__":
