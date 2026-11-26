@@ -92,7 +92,10 @@ _post_payload_file() {
         fi
         echo "$label: POST failed attempt $attempt/$RESULT_RETRY: HTTP ${http_code:-000} curl=$(tr '\n' ' ' <"$curl_err") body=$(tr '\n' ' ' <"$curl_body" | head -c 500)"
         rm -f "$curl_err" "$curl_body"
-        sleep $((attempt < 4 ? attempt * 2 : 8))
+        # No backoff after the final attempt -- it only delays the spool fallback.
+        if (( attempt < RESULT_RETRY )); then
+            sleep $((attempt < 4 ? attempt * 2 : 8))
+        fi
         ((attempt++)) || true
     done
     return 1
@@ -148,10 +151,6 @@ report_result() {
     [[ -n "${RESULT_SERVER_URL:-}" ]] || return 0
     if ! command -v python3 &>/dev/null; then
         echo "Cannot build result payload (python3 missing)"
-        return 0
-    fi
-    if ! command -v curl &>/dev/null; then
-        echo "Cannot POST result payload (curl missing)"
         return 0
     fi
 
@@ -277,6 +276,15 @@ PY
         return 1
     fi
 
+    # Without curl we cannot POST, but the payload is already built -- spool it so
+    # a later run (or manual collection) can still recover the result.
+    if ! command -v curl &>/dev/null; then
+        echo "curl missing; spooling result payload for later POST"
+        cp -f "$payload_file" "${pending_dir}/${JOB_NAME}-payload.json" 2>/dev/null || \
+            echo "ERROR: failed to spool $payload_file into $pending_dir" >&2
+        return 0
+    fi
+
     local pending
     shopt -s nullglob
     for pending in "$pending_dir"/*.json; do
@@ -353,8 +361,13 @@ else
     rm -f "$BUILD_MARKER"
     sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
     ./hammerdbcli auto "$HDB_BUILD_TCL" 2>&1 | tee "$HDB_BUILD_LOG"
-    if grep -qiE 'error|fatal|could not|failed' "$HDB_BUILD_LOG" \
-        || ! grep -qi 'schema complete' "$HDB_BUILD_LOG"; then
+    # Trust the build only when it shows a completion marker (6.0+ prints
+    # "Schema complete" and/or "ALL VIRTUAL USERS COMPLETE") and no real error
+    # line. A broad 'error|failed' match false-positives on benign text; keep the
+    # error patterns specific. These markers are HammerDB-version-specific --
+    # validate them against your release.
+    if ! grep -qiE 'schema complete|all virtual users complete' "$HDB_BUILD_LOG" \
+        || grep -qiE 'error in virtual user|fatal error|could not|failed to' "$HDB_BUILD_LOG"; then
         echo "HammerDB build did not complete cleanly; not running benchmark" >&2
         exit 1
     fi

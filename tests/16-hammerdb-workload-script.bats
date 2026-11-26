@@ -26,7 +26,7 @@ setup_file() {
 # line and writes the `jobs save` JSON report under $TMP, echoing its path.
 script="${2:-}"
 case "$script" in
-    *build*) echo "Vuser 1:Schema complete" ;;
+    *build*) echo "${HDB_MOCK_BUILD_OUT:-Vuser 1:Schema complete}" ;;
     *run*)
         echo "Vuser 1:TEST RESULT : System achieved 12345 NOPM from 67890 PostgreSQL TPM"
         jobfile="${TMP:-/tmp}/hdb_ABC123DEF.json"
@@ -137,6 +137,24 @@ _hdb_cleanup() {
     grep -q 'System achieved 12345 NOPM' "$HDB_RESULT_TXT"
     # No RESULT_SERVER_URL -> no canonical payload built.
     [[ ! -f "$HDB_RESULTS_DIR/tproc-c-payload.json" ]]
+    _hdb_cleanup
+}
+
+@test "HDB: build guard accepts the 6.0+ completion marker without 'schema complete'" {
+    _hdb_prepare
+    export HDB_MOCK_BUILD_OUT="Vuser 1:ALL VIRTUAL USERS COMPLETE"
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HammerDB run finished"* ]]
+    _hdb_cleanup
+}
+
+@test "HDB: build guard does not abort on benign 'error' text in the log" {
+    _hdb_prepare
+    export HDB_MOCK_BUILD_OUT=$'Vuser 1:Schema complete\nVuser 1:0 errors reported'
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"HammerDB run finished"* ]]
     _hdb_cleanup
 }
 
