@@ -192,7 +192,7 @@ node --test monitoring/tests/test_dashboard_lib.js
 
 # YAML lint — changed plain YAML (helpers/, workload/, monitoring/yaml/,
 # monitoring/tests/fixtures/, .github/workflows/; NOT templates/)
-yamllint helpers/*.yaml workload/*.yaml workload/*/*.yaml monitoring/yaml/*.yaml \
+yamllint helpers/*.yaml workload/*/*.yaml monitoring/yaml/*.yaml \
   monitoring/tests/fixtures/*.yaml .github/workflows/*.yaml
 
 # Markdown lint — changed .md files

@@ -17,10 +17,14 @@ PGDATA=/var/lib/pgsql/data
 if [[ ! -d "$PGDATA/base" ]]; then
     postgresql-setup --initdb
 fi
-if ! grep -qE '^host .* 127\.0\.0\.1/32 .*(md5|scram)' "$PGDATA/pg_hba.conf"; then
-    printf 'host all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n' \
-        >> "$PGDATA/pg_hba.conf"
-fi
+# pg_hba is first-match, and default RHEL ships loopback rules (ident/peer)
+# that would win over an appended md5 rule. Drop any existing loopback host
+# rules (IPv4 and IPv6) so our password rules take precedence, then append
+# them. Idempotent: a re-run removes the rules we added and re-appends them.
+sed -i -E '/^[[:space:]]*host[[:space:]].*[[:space:]](127\.0\.0\.1\/32|::1\/128)[[:space:]]/d' \
+    "$PGDATA/pg_hba.conf"
+printf 'host all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n' \
+    >> "$PGDATA/pg_hba.conf"
 systemctl enable --now postgresql
 # pg_superuserpass in build.tcl must match this password.
 sudo -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
@@ -53,6 +57,9 @@ else
     # IF EXISTS is a harmless no-op on a genuine first build, and touches
     # only tpcc. (PostgreSQL shown; use the DB-specific drop for
     # mysql/maria/mssql.)
+    # Clear the marker before dropping: if the rebuild fails after the DROP, no
+    # stale marker survives to skip the (now-missing) schema on the next run.
+    rm -f "$BUILD_MARKER"
     sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
     build_log=/root/hammerdb-build.log
     ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee "$build_log"
