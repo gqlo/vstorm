@@ -40,7 +40,6 @@ echo "==> yamllint (plain YAML: helpers, workload, monitoring, workflows)"
 shopt -s nullglob
 _yaml_files=(
   helpers/*.yaml
-  workload/*.yaml
   workload/*/*.yaml
   monitoring/yaml/*.yaml
   monitoring/tests/fixtures/*.yaml

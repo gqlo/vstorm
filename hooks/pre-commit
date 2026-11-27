@@ -35,7 +35,7 @@ while IFS= read -r f; do
 
     # Same scope as CI lint-yaml (.github/workflows/test.yaml)
     case "$f" in
-        helpers/*.yaml|workload/*.yaml|workload/*/*.yaml|monitoring/yaml/*.yaml|\
+        helpers/*.yaml|workload/*/*.yaml|monitoring/yaml/*.yaml|\
         monitoring/tests/fixtures/*.yaml|.github/workflows/*.yaml)
             yaml_files+=("$f") ;;
     esac
