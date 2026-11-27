@@ -242,6 +242,119 @@ def extract_fio_metrics(payload: dict[str, Any]) -> tuple[float | None, float | 
     return (iops if iops else None), (bw if bw else None), lat_ns
 
 
+def _fio_metric_bag(payload: dict[str, Any]) -> dict[str, float]:
+    """fio metrics as a named bag: iops, bw_bytes, lat_ns (omit missing)."""
+    iops, bw, lat = extract_fio_metrics(payload)
+    bag: dict[str, float] = {}
+    if iops is not None:
+        bag["iops"] = iops
+    if bw is not None:
+        bag["bw_bytes"] = bw
+    if lat is not None:
+        bag["lat_ns"] = lat
+    return bag
+
+
+def _hammerdb_metric_bag(payload: dict[str, Any]) -> dict[str, float]:
+    """HammerDB TPROC-C metrics: tpm, nopm (omit missing/unparseable)."""
+    bag: dict[str, float] = {}
+    for key in ("tpm", "nopm"):
+        val = payload.get(key)
+        if val is None:
+            continue
+        try:
+            bag[key] = float(val)
+        except (TypeError, ValueError):
+            pass
+    return bag
+
+
+# Per-workload metric model. Each spec declares the ordered metric names the
+# workload produces, the extractor that pulls them from a result payload, and
+# the payload key carrying its process return code. Unknown workloads ingest
+# with an empty metric bag (no extractor registered).
+WORKLOAD_SPECS: dict[str, dict[str, Any]] = {
+    "fio": {
+        "metrics": ("iops", "bw_bytes", "lat_ns"),
+        "extract": _fio_metric_bag,
+        "rc_key": "fio_rc",
+    },
+    "hammerdb": {
+        "metrics": ("tpm", "nopm"),
+        "extract": _hammerdb_metric_bag,
+        "rc_key": "hdb_rc",
+    },
+}
+
+
+def metric_names_for(workload_kind: str | None) -> tuple[str, ...]:
+    """Ordered metric names a workload produces; empty for unknown workloads."""
+    spec = WORKLOAD_SPECS.get(workload_kind or "")
+    return tuple(spec["metrics"]) if spec else ()
+
+
+def extract_metrics(workload_kind: str | None, payload: dict[str, Any]) -> dict[str, float]:
+    """Return the named metric bag for a result payload (empty if unknown)."""
+    spec = WORKLOAD_SPECS.get(workload_kind or "")
+    if not spec:
+        return {}
+    bag = spec["extract"](payload)
+    return bag if isinstance(bag, dict) else {}
+
+
+def extract_rc(workload_kind: str | None, payload: dict[str, Any]) -> int | None:
+    """Return the generic process return code for a result payload.
+
+    Prefers the generic `rc`, then the workload's own rc key (e.g. fio_rc,
+    hdb_rc), so new workloads only need to set `rc`.
+    """
+    keys: list[str] = ["rc"]
+    spec = WORKLOAD_SPECS.get(workload_kind or "")
+    if spec and spec.get("rc_key"):
+        keys.append(str(spec["rc_key"]))
+    keys.append("fio_rc")  # legacy fallback
+    for key in keys:
+        val = payload.get(key)
+        if val is None:
+            continue
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def aggregate_metric_bags(
+    bags: list[dict[str, float]],
+) -> dict[str, dict[str, float | None]]:
+    """Aggregate a list of metric bags into per-metric {avg, p50, p99}.
+
+    Metric names are discovered from the bags themselves, so this works for any
+    workload. Missing values are skipped per metric (a bag need not carry every
+    name). Metrics with no numeric samples are omitted entirely.
+    """
+    names: list[str] = []
+    for bag in bags:
+        for name in bag:
+            if name not in names:
+                names.append(name)
+    out: dict[str, dict[str, float | None]] = {}
+    for name in names:
+        vals = sorted(
+            float(bag[name])
+            for bag in bags
+            if isinstance(bag.get(name), (int, float))
+        )
+        if not vals:
+            continue
+        out[name] = {
+            "avg": statistics.mean(vals),
+            "p50": percentile(vals, 50),
+            "p99": percentile(vals, 99),
+        }
+    return out
+
+
 def workload_fingerprint(payload: dict[str, Any]) -> str | None:
     wl = payload.get("workload")
     if isinstance(wl, dict) and wl:
@@ -313,6 +426,8 @@ class Store:
                     iops REAL,
                     bw_bytes REAL,
                     lat_ns REAL,
+                    rc INTEGER,
+                    metrics_json TEXT,
                     fingerprint TEXT,
                     file_path TEXT NOT NULL,
                     created_at INTEGER NOT NULL
@@ -362,6 +477,16 @@ class Store:
             self._conn.execute("ALTER TABLE results ADD COLUMN error_message TEXT")
         if "source" not in cols:
             self._conn.execute("ALTER TABLE results ADD COLUMN source TEXT")
+        if "rc" not in cols:
+            self._conn.execute("ALTER TABLE results ADD COLUMN rc INTEGER")
+            # Backfill generic rc from the legacy fio_rc column where present.
+            if "fio_rc" in cols:
+                self._conn.execute(
+                    "UPDATE results SET rc = fio_rc WHERE rc IS NULL AND fio_rc IS NOT NULL"
+                )
+        if "metrics_json" not in cols:
+            self._conn.execute("ALTER TABLE results ADD COLUMN metrics_json TEXT")
+            self._backfill_results_metrics_json()
         batch_cols = {r[1] for r in self._conn.execute("PRAGMA table_info(batches)")}
         # List-view metadata (avoid loading full manifest JSON on GET /v1/batches).
         if "api_server" not in batch_cols:
@@ -381,6 +506,7 @@ class Store:
             "bw_avg": "REAL",
             "bw_p50": "REAL",
             "bw_p99": "REAL",
+            "batch_metrics_json": "TEXT",
             "fingerprint": "TEXT",
             "first_cycle_at": "INTEGER",
             "last_cycle_at": "INTEGER",
@@ -409,6 +535,29 @@ class Store:
         if "vmi_phase" not in pol_cols:
             self._conn.execute("ALTER TABLE vm_policies ADD COLUMN vmi_phase TEXT")
         self._conn.commit()
+
+    def _backfill_results_metrics_json(self) -> None:
+        """Populate metrics_json for pre-existing rows from the legacy fio columns.
+
+        Older rows only carry iops/bw_bytes/lat_ns. Rebuild the named metric bag
+        from them so generic aggregation sees historical fio results too.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT result_id, iops, bw_bytes, lat_ns FROM results
+            WHERE metrics_json IS NULL
+              AND (iops IS NOT NULL OR bw_bytes IS NOT NULL OR lat_ns IS NOT NULL)
+            """
+        ).fetchall()
+        for row in rows:
+            bag: dict[str, float] = {}
+            for name in ("iops", "bw_bytes", "lat_ns"):
+                if row[name] is not None:
+                    bag[name] = float(row[name])
+            self._conn.execute(
+                "UPDATE results SET metrics_json = ? WHERE result_id = ?",
+                (json.dumps(bag, sort_keys=True), row["result_id"]),
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -492,6 +641,9 @@ class Store:
         rel_path = str(file_path.relative_to(self.data_dir))
 
         iops, bw_bytes, lat_ns = extract_fio_metrics(payload)
+        metrics = extract_metrics(workload_kind, payload)
+        metrics_json = json.dumps(metrics, sort_keys=True) if metrics else None
+        rc = extract_rc(workload_kind, payload)
         fingerprint = workload_fingerprint(payload)
         vm_name = payload.get("vm_name") or payload.get("hostname")
         hostname = payload.get("hostname")
@@ -507,8 +659,8 @@ class Store:
                     result_id, batch_id, source, workload_kind, record_type, hostname, vm_name,
                     cycle, started_at, stopped_at, reported_at, boot_timestamp_unix,
                     cpu_count, mem_total_kb, fio_rc, status, error_message, iops, bw_bytes, lat_ns,
-                    fingerprint, file_path, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rc, metrics_json, fingerprint, file_path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result_id,
@@ -533,6 +685,8 @@ class Store:
                     iops,
                     bw_bytes,
                     lat_ns,
+                    rc,
+                    metrics_json,
                     fingerprint,
                     rel_path,
                     now,
@@ -1076,6 +1230,7 @@ class Store:
                     cycle_count = ?, event_count = ?, error_count = ?, vms_reporting = ?,
                     iops_avg = ?, iops_p50 = ?, iops_p99 = ?,
                     bw_avg = ?, bw_p50 = ?, bw_p99 = ?,
+                    batch_metrics_json = ?,
                     fingerprint = ?, first_cycle_at = ?, last_cycle_at = ?,
                     vm_summary_json = ?, list_sort_at = ?
                 WHERE batch_id = ?
@@ -1091,6 +1246,7 @@ class Store:
                     stats["bw_avg"],
                     stats["bw_p50"],
                     stats["bw_p99"],
+                    stats["batch_metrics_json"],
                     stats["fingerprint"],
                     stats["first_cycle_at"],
                     stats["last_cycle_at"],
@@ -1480,7 +1636,8 @@ class Store:
     def _cycle_stats(self, batch_id: str) -> dict[str, Any]:
         cycles = self._conn.execute(
             """
-            SELECT iops, bw_bytes, lat_ns, vm_name, started_at, stopped_at, fingerprint, status, fio_rc
+            SELECT iops, bw_bytes, lat_ns, metrics_json, vm_name, started_at, stopped_at,
+                   fingerprint, status, fio_rc
             FROM results
             WHERE batch_id = ? AND record_type IN ('result', 'cycle')
             """,
@@ -1495,6 +1652,18 @@ class Store:
         ).fetchone()["c"]
         iops_vals = sorted(float(r["iops"]) for r in cycles if r["iops"] is not None)
         bw_vals = sorted(float(r["bw_bytes"]) for r in cycles if r["bw_bytes"] is not None)
+        metric_bags: list[dict[str, float]] = []
+        for r in cycles:
+            raw = r["metrics_json"]
+            if not raw:
+                continue
+            try:
+                bag = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(bag, dict):
+                metric_bags.append(bag)
+        batch_metrics = aggregate_metric_bags(metric_bags)
         vms = {r["vm_name"] for r in cycles if r["vm_name"]}
         fingerprints = [r["fingerprint"] for r in cycles if r["fingerprint"]]
         started = [r["started_at"] for r in cycles if r["started_at"] is not None]
@@ -1515,6 +1684,9 @@ class Store:
             "bw_avg": statistics.mean(bw_vals) if bw_vals else None,
             "bw_p50": percentile(bw_vals, 50),
             "bw_p99": percentile(bw_vals, 99),
+            "batch_metrics_json": json.dumps(batch_metrics, sort_keys=True)
+            if batch_metrics
+            else None,
             "fingerprint": fingerprints[-1] if fingerprints else None,
             "first_cycle_at": min(started) if started else None,
             "last_cycle_at": max(
