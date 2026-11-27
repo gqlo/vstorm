@@ -238,7 +238,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "UDN: explicit cloud-init includes DHCP networkData" {
   run bash "$VSTORM" -n --batch-id=udn008 --udn-l2 \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --datasource=rhel9 --no-snapshot --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 

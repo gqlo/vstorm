@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 # Test the fio workload script (syntax, one-shot run, branch coverage).
-# The standalone workload/fio_workload.sh is the source of truth; vstorm splices
+# The standalone workload/fio/fio_workload.sh is the source of truth; vstorm splices
 # it into the cloud-init YAML at runtime via {FIO_WORKLOAD_SCRIPT}.
 
 load 'helpers'
 
-YAML="workload/cloudinit-fio-workload.yaml"
-SCRIPT="workload/fio_workload.sh"
-SERVICE="workload/fio-workload.service"
+YAML="workload/fio/cloudinit-fio-workload.yaml"
+SCRIPT="workload/fio/fio_workload.sh"
+SERVICE="workload/fio/fio-workload.service"
 
 setup_file() {
     # The splice test runs `vstorm -n`, which queries oc during access-mode

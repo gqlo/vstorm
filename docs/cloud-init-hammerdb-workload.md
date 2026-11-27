@@ -1,11 +1,13 @@
 # Cloud-init and HammerDB workload
 
 > **Status: design plan / proposal.** This is a guide for *adding* a HammerDB
-> workload. The `workload/cloudinit-hammerdb-workload.yaml` profile and its
-> result-sync wiring do **not** exist yet — the YAML and shell below are a
-> skeleton to build from, not a shipped, tested workload. The `vstorm` commands
-> throughout assume you have first created that file (see
-> [The cloud-init profile](#the-cloud-init-profile)); they will fail until you do.
+> workload. The run scripts and unit under `workload/hammerdb/` exist, but the
+> `workload/hammerdb/cloudinit-hammerdb-workload.yaml` profile, the `{HAMMERDB_*}` splice
+> wiring in `vstorm`, and the result-sync integration do **not** exist yet — this
+> is a skeleton to build from, not a shipped, tested workload. The `vstorm`
+> commands throughout assume you have first created the profile and wired it up
+> (see [The cloud-init profile](#the-cloud-init-profile)); they will fail until
+> you do.
 
 Run a [HammerDB](https://www.hammerdb.com/docs6.1/ch01s14.html#d0e755) TPROC-C
 (OLTP) database benchmark inside VMs at boot. This plan follows the same pattern
@@ -24,15 +26,15 @@ For VM CPU/memory options (`--cores`, `--memory`, etc.), see the main
 
 ## Quick start: example commands
 
-Once you have created `workload/cloudinit-hammerdb-workload.yaml` from
+Once you have created `workload/hammerdb/cloudinit-hammerdb-workload.yaml` from
 [the skeleton below](#the-cloud-init-profile), these are the intended invocations:
 
 | Goal | Command |
 |------|---------|
-| Default (PostgreSQL TPROC-C) | `vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml --cores=4 --memory=8Gi --vms=5` |
-| Bigger schema + more virtual users | `vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml --env HDB_WAREHOUSES=20 --env HDB_VU=8 --cores=8 --memory=16Gi --vms=5` |
-| Longer run | `vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml --env HDB_RAMPUP=5 --env HDB_DURATION=30 --vms=5` |
-| Dry-run to preview | `vstorm -n --cloudinit=workload/cloudinit-hammerdb-workload.yaml --vms=3` |
+| Default (PostgreSQL TPROC-C) | `vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml --cores=4 --memory=8Gi --vms=5` |
+| Bigger schema + more virtual users | `vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml --env HDB_WAREHOUSES=20 --env HDB_VU=8 --cores=8 --memory=16Gi --vms=5` |
+| Longer run | `vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml --env HDB_RAMPUP=5 --env HDB_DURATION=30 --vms=5` |
+| Dry-run to preview | `vstorm -n --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml --vms=3` |
 
 Defaults target a **small, self-contained** run (a few warehouses) so it
 completes on modest VMs. Scale up with `--env` and larger `--cores`/`--memory`.
@@ -67,7 +69,7 @@ data directory at it.
 ## Run at boot
 
 ```bash
-vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml --vms=5 --namespaces=2
+vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml --vms=5 --namespaces=2
 ```
 
 The image already has the DB + HammerDB. vstorm injects the build/run Tcl scripts
@@ -79,7 +81,7 @@ schema → run benchmark → exit). Pass `HDB_*` once via `vstorm --env`.
 below only writes NOPM/TPM to `/root/hammerdb-result.txt` and leaves a TODO where a
 collector POST would go. To push results to the dashboard, you must add a
 `report_result`/heartbeat implementation — mirror
-[`report_result` in workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml)
+[`report_result` in workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml)
 and see [workload result sync and dashboard](workload-result-sync-and-dashboard.md).
 The `RESULT_SERVER_URL` / `VSTORM_*` rows below are the *intended* contract for
 that future work, not yet wired up.
@@ -100,12 +102,12 @@ Override with `--env KEY=VAL` (repeat as needed):
 
 ```bash
 # Larger schema and more virtual users
-vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml \
+vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=50 --env HDB_VU=16 \
   --cores=8 --memory=16Gi --vms=5
 
 # Collect results to the dashboard collector (requires adding the POST — see above)
-vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml \
+vstorm --cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml \
   --env HDB_WAREHOUSES=20 --env HDB_VU=8 \
   --env RESULT_SERVER_URL=http://<reachable-host>:8080/v1/results \
   --cores=8 --memory=16Gi --vms=5 --wait
@@ -113,9 +115,9 @@ vstorm --cloudinit=workload/cloudinit-hammerdb-workload.yaml \
 
 ## The cloud-init profile
 
-Create `workload/cloudinit-hammerdb-workload.yaml`. The skeleton below mirrors the
+Create `workload/hammerdb/cloudinit-hammerdb-workload.yaml`. The skeleton below mirrors the
 fio/stress-ng profiles — see
-[workload/cloudinit-fio-workload.yaml](../workload/cloudinit-fio-workload.yaml)
+[workload/fio/cloudinit-fio-workload.yaml](../workload/fio/cloudinit-fio-workload.yaml)
 for the full result-sync boilerplate (`/etc/default/vstorm-guest-env`,
 `vstorm-boot-timestamp.service`) to copy verbatim.
 
@@ -180,147 +182,17 @@ Because HammerDB and the database are **already in the image**, the orchestratio
 script only initializes the DB, builds the schema once, and runs the benchmark —
 there is no package install or HammerDB download.
 
-`workload/hammerdb/build.tcl` — TPROC-C schema build (CLI / autopilot mode):
+These files already exist in the repo — they are the single source of truth for
+the run logic and the unit; vstorm fills the placeholders above from them. Read
+them directly:
 
-```tcl
-dbset db $env(HDB_DB)
-dbset bm TPC-C
-diset connection pg_host localhost
-diset connection pg_port 5432
-diset tpcc pg_superuser postgres
-diset tpcc pg_superuserpass postgres
-diset tpcc pg_user tpcc
-diset tpcc pg_pass tpcc
-diset tpcc pg_dbase tpcc
-diset tpcc pg_count_ware $env(HDB_WAREHOUSES)
-# Build users must not exceed the warehouse count.
-diset tpcc pg_num_vu [expr {min($env(HDB_VU), $env(HDB_WAREHOUSES))}]
-buildschema
-waittocomplete
-quit
-```
-
-`workload/hammerdb/run.tcl` — TPROC-C timed run:
-
-```tcl
-dbset db $env(HDB_DB)
-dbset bm TPC-C
-diset connection pg_host localhost
-diset connection pg_port 5432
-diset tpcc pg_user tpcc
-diset tpcc pg_pass tpcc
-diset tpcc pg_dbase tpcc
-diset tpcc pg_driver timed
-diset tpcc pg_rampup $env(HDB_RAMPUP)
-diset tpcc pg_duration $env(HDB_DURATION)
-loadscript
-vuset vu $env(HDB_VU)
-vuset logtotemp 1
-vucreate
-vurun
-runtimer [expr {($env(HDB_RAMPUP) + $env(HDB_DURATION)) * 60 + 30}]
-vudestroy
-quit
-```
-
-`workload/hammerdb/hammerdb_workload.sh` — defaults, DB init, build + run:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-
-export HDB_DB="${HDB_DB:-pg}"
-export HDB_WAREHOUSES="${HDB_WAREHOUSES:-4}"
-export HDB_VU="${HDB_VU:-4}"
-export HDB_RAMPUP="${HDB_RAMPUP:-2}"
-export HDB_DURATION="${HDB_DURATION:-5}"
-
-echo "Starting HammerDB TPROC-C: db=$HDB_DB warehouses=$HDB_WAREHOUSES vu=$HDB_VU"
-
-# 1) Initialize and start PostgreSQL, then set up credentials.
-# HammerDB connects over TCP (pg_host=localhost) as the superuser WITH a
-# password, so the postgres role needs a password and pg_hba must allow
-# password auth on loopback (default RHEL pg_hba uses ident/peer).
-PGDATA=/var/lib/pgsql/data
-if [[ ! -d "$PGDATA/base" ]]; then
-    postgresql-setup --initdb
-fi
-if ! grep -qE '^host .* 127\.0\.0\.1/32 .*(md5|scram)' "$PGDATA/pg_hba.conf"; then
-    printf 'host all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n' \
-        >> "$PGDATA/pg_hba.conf"
-fi
-systemctl enable --now postgresql
-# pg_superuserpass in build.tcl must match this password.
-sudo -u postgres psql -c "ALTER ROLE postgres WITH PASSWORD 'postgres';"
-sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='tpcc'" \
-    | grep -q 1 || sudo -u postgres psql -c \
-    "CREATE ROLE tpcc WITH LOGIN SUPERUSER PASSWORD 'tpcc';"
-
-# 2) HammerDB is pre-installed in the image at /opt/HammerDB.
-cd /opt/HammerDB
-
-# 3) Build the schema once per configuration, then run the timed benchmark.
-#    hammerdbcli can exit 0 even when the build logged an error, so capture
-#    the build output and require a completion line (and no error lines)
-#    before trusting it. The sentinel records the schema configuration so a
-#    reboot skips the build only when it still matches; a changed
-#    HDB_WAREHOUSES (or HDB_DB) rebuilds instead of running a stale schema.
-#    The completion/error patterns are HammerDB-version-specific — validate
-#    them against your release.
-BUILD_MARKER=/var/lib/vstorm-hammerdb-build.done
-build_sig="db=$HDB_DB warehouses=$HDB_WAREHOUSES"
-if [[ -f "$BUILD_MARKER" && "$(cat "$BUILD_MARKER")" == "$build_sig" ]]; then
-    echo "Schema already built for [$build_sig]; skipping build"
-else
-    if [[ -f "$BUILD_MARKER" ]]; then
-        echo "Schema config changed ($(cat "$BUILD_MARKER") -> $build_sig); rebuilding"
-    fi
-    # Drop any existing tpcc before (re)building so a changed config OR a
-    # retry after a failed/partial first build (no marker yet) starts clean
-    # instead of running buildschema against a half-built schema. DROP ...
-    # IF EXISTS is a harmless no-op on a genuine first build, and touches
-    # only tpcc. (PostgreSQL shown; use the DB-specific drop for
-    # mysql/maria/mssql.)
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS tpcc;"
-    build_log=/root/hammerdb-build.log
-    ./hammerdbcli auto /opt/hammerdb/build.tcl 2>&1 | tee "$build_log"
-    if grep -qiE 'error|fatal|could not|failed' "$build_log" \
-        || ! grep -qi 'schema complete' "$build_log"; then
-        echo "HammerDB build did not complete cleanly; not running benchmark" >&2
-        exit 1
-    fi
-    printf '%s\n' "$build_sig" > "$BUILD_MARKER"
-fi
-
-./hammerdbcli auto /opt/hammerdb/run.tcl | tee /root/hammerdb-result.txt
-
-echo "HammerDB run finished."
-# Optional: parse NOPM/TPM from /root/hammerdb-result.txt and POST to
-# RESULT_SERVER_URL (see docs/workload-result-sync-and-dashboard.md).
-```
-
-`workload/hammerdb/hammerdb-workload.service` — one-shot systemd unit:
-
-```ini
-[Unit]
-Description=HammerDB TPROC-C workload (one-shot)
-After=network-online.target postgresql.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# Schema build + rampup + duration far exceed systemd's default 90s
-# start timeout for a Type=oneshot unit; disable it so the benchmark
-# is not SIGTERM'd mid-run.
-TimeoutStartSec=0
-EnvironmentFile=-/etc/default/vstorm-guest-env
-ExecStart=/opt/hammerdb_workload.sh
-Restart=no
-
-[Install]
-WantedBy=multi-user.target
-```
+- [`workload/hammerdb/build.tcl`](../workload/hammerdb/build.tcl) — TPROC-C schema
+  build (CLI / autopilot mode).
+- [`workload/hammerdb/run.tcl`](../workload/hammerdb/run.tcl) — TPROC-C timed run.
+- [`workload/hammerdb/hammerdb_workload.sh`](../workload/hammerdb/hammerdb_workload.sh)
+  — defaults, DB init, schema build + timed run.
+- [`workload/hammerdb/hammerdb-workload.service`](../workload/hammerdb/hammerdb-workload.service)
+  — one-shot systemd unit.
 
 Notes:
 
@@ -430,7 +302,7 @@ cat /root/hammerdb-result.txt     # NOPM / TPM once the run completes
 
 ### End-to-end flow
 
-1. User runs vstorm with `--cloudinit=workload/cloudinit-hammerdb-workload.yaml`
+1. User runs vstorm with `--cloudinit=workload/hammerdb/cloudinit-hammerdb-workload.yaml`
    against an image that already has the DB + HammerDB installed.
 2. vstorm replaces `{VSTORM_GUEST_ENV}` with `--env` lines and the script
    placeholders (`{HAMMERDB_*}`) with the files from `workload/hammerdb/`,
@@ -452,7 +324,7 @@ cat /root/hammerdb-result.txt     # NOPM / TPM once the run completes
 
 | Location | Role |
 |----------|------|
-| **workload/cloudinit-hammerdb-workload.yaml** | The cloud-init profile (slim: env + placeholders only). |
+| **workload/hammerdb/cloudinit-hammerdb-workload.yaml** | The cloud-init profile (slim: env + placeholders only). |
 | **workload/hammerdb/{build.tcl,run.tcl,hammerdb_workload.sh,hammerdb-workload.service}** | The run scripts + unit vstorm injects into the Secret. |
 | **templates/cloudinit-secret.yaml** | Secret template with `userdata: {CLOUDINIT_B64}`. |
 | **vstorm** | Reads the profile, replaces `{VSTORM_GUEST_ENV}` + `{HAMMERDB_*}`, base64-encodes, substitutes into the template. |

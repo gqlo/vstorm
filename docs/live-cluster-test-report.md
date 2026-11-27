@@ -20,20 +20,20 @@
 | 1 | `--cores=4 --memory=8Gi --vms=3 --namespaces=2` | 3 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
 | 2 | `--datasource=fedora --vms=5 --namespaces=1` | 5 | Yes | 3/5 OK | **PASS** |
 | 3 | `--dv-url=http://d21-h25-000-r650:8000/rhel9-cloud-init.qcow --vms=2 --namespaces=2` | 0 | No | N/A | **FAIL** |
-| 4 | `--cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=2` | 5 | Yes | 2/2 OK | **PASS** |
+| 4 | `--cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=2` | 5 | Yes | 2/2 OK | **PASS** |
 | 5 | `--datasource=centos-stream9 --vms=5 --namespaces=1` | 5 | Yes | 0/5 FAIL | **PARTIAL** |
 | 6 | `--storage-class=ocs-storagecluster-ceph-rbd --vms=5 --namespaces=2` | 5 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
 | 7 | `--no-snapshot --vms=1 --namespaces=1` | 1 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
 | 8 | `--containerdisk --vms=3 --namespaces=1` | 3 | Yes | 2/3 OK | **PASS** |
 | 9 | `--storage-class=lvms-vg-nvme --snapshot-class=lvms-vg-nvme --vms=3 --namespaces=2` | 0 | No | N/A | **FAIL** |
 | 10 | `--vms-per-namespace=5 --namespaces=3 --wait` | 15 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
-| 11 | `--containerdisk --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=3 --namespaces=2` | 3 | Yes | 2/2 OK | **PASS** |
+| 11 | `--containerdisk --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=3 --namespaces=2` | 3 | Yes | 2/2 OK | **PASS** |
 | 12 | `--run-strategy=Halted --vms=3 --namespaces=1` | 3 | N/A (Halted) | N/A (Halted) | **PASS** |
 | 13 | `--cores=2 --memory=4Gi --request-cpu=500m --request-memory=2Gi --vms=3` | 3 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
 | 14 | `--basename=perf-vm --storage-size=50Gi --vms=3 --namespaces=1` | 3 | Yes | N/A (URL mode, no cloud-init) | **PASS** |
 | 15 | `--profile --vms=10 --namespaces=2` | 10 | Yes | N/A | **PARTIAL** |
 | 16 | `--memory=8Gi --cores=2 --dv-url=... --cloudinit=... --env STRESS_TOGETHER=0 --env CPU_ACTIVE_PROBABILITY=30 --env MEM_ACTIVE_PROBABILITY=80` | 1 | Yes | 1/1 OK | **PASS** |
-| 17 | `--cores=4 --memory=8Gi --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --dv-url=... --env DIRTY_RATE_FRACTION=0.4 --vms=1` | 1 | Yes | 1/1 OK | **PASS** |
+| 17 | `--cores=4 --memory=8Gi --cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml --dv-url=... --env DIRTY_RATE_FRACTION=0.4 --vms=1` | 1 | Yes | 1/1 OK | **PASS** |
 
 **2026-04-30 run: 66 VMs created across all tests. 66/66 reached Running state (Tests 3 and 9 failed with 0 VMs created). 13/17 tests fully passed. 2 partial. 2 fail (infrastructure issues).**
 
@@ -136,7 +136,7 @@
 **Command:**
 
 ```bash
-./vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=2
+./vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=5 --namespaces=2
 ```
 
 **Batch ID:** `071186` (2026-04-30), previously `4bdda2` (2026-02-12)
@@ -145,9 +145,9 @@
 
 | Option | Expected | Verified |
 |---|---|---|
-| `--cloudinit=workload/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `vm-cloudinit` Secret in both ns (Opaque, 1 key) |
+| `--cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `vm-cloudinit` Secret in both ns (Opaque, 1 key) |
 | Cloud-init in VM | `cloudInitNoCloud.secretRef.name: vm-cloudinit` | Yes -- confirmed via jsonpath |
-| Not auto-applied | Should not say "applying default cloud-init" | Yes -- log says `Cloud-init: workload/cloudinit-stress-ng-workload.yaml` |
+| Not auto-applied | Should not say "applying default cloud-init" | Yes -- log says `Cloud-init: workload/stress-ng/cloudinit-stress-ng-workload.yaml` |
 | `--vms=5` | 5 total VMs | Yes |
 | `--namespaces=2` | 2 namespaces | Yes |
 | VM distribution | 3 in ns-1, 2 in ns-2 | Yes -- confirmed |
@@ -333,7 +333,7 @@
 **Command:**
 
 ```bash
-./vstorm --containerdisk --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=3 --namespaces=2
+./vstorm --containerdisk --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=3 --namespaces=2
 ```
 
 **Batch ID:** `a21648` (2026-04-30)
@@ -343,7 +343,7 @@
 | Option | Expected | Verified |
 |---|---|---|
 | `--containerdisk` | VMs boot from container image (no PVC) | Yes -- `containerDisk.image=quay.io/containerdisks/fedora:latest` |
-| `--cloudinit=workload/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `fedora-cloudinit` Secret in both ns (Opaque, 1 key) |
+| `--cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `fedora-cloudinit` Secret in both ns (Opaque, 1 key) |
 | Cloud-init in VM | `cloudInitNoCloud.secretRef` references the custom Secret | Yes -- confirmed via jsonpath |
 | `--vms=3` | 3 total VMs | Yes -- 3 VMs, all Running |
 | `--namespaces=2` | 2 namespaces | Yes -- `vm-a21648-ns-{1,2}` |
@@ -462,7 +462,7 @@
 ```bash
 ./vstorm --memory=8Gi --cores=2 \
   --dv-url=http://d21-h25-000-r650.rdu2.scalelab.redhat.com:8088/rhel9-cloud-init.qcow \
-  --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+  --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env STRESS_TOGETHER=0 \
   --env CPU_ACTIVE_PROBABILITY=30 \
   --env MEM_ACTIVE_PROBABILITY=80
@@ -477,7 +477,7 @@
 | `--memory=8Gi` | Guest sees 8Gi memory | Yes -- `mem=8Gi`; `free -h` shows 7.5Gi total |
 | `--cores=2` | Guest sees 2 CPU cores | Yes -- `cores=2`; `nproc` shows 2 |
 | `--dv-url=...` | DV uses `source.http.url` (not DataSource sourceRef) | Yes -- `url=http://d21-h25-000-r650...:8088/rhel9-cloud-init.qcow` on base DV |
-| `--cloudinit=workload/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `vm-cloudinit` Secret present |
+| `--cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml` | Custom cloud-init Secret per namespace | Yes -- `vm-cloudinit` Secret present |
 | `--env STRESS_TOGETHER=0` | In `/etc/default/vstorm-guest-env` in Secret | Yes -- confirmed in Secret data |
 | `--env CPU_ACTIVE_PROBABILITY=30` | In `/etc/default/vstorm-guest-env` in Secret | Yes -- confirmed in Secret data |
 | `--env MEM_ACTIVE_PROBABILITY=80` | In `/etc/default/vstorm-guest-env` in Secret | Yes -- confirmed in Secret data |
@@ -494,7 +494,7 @@
 ```bash
 ./vstorm --cores=4 --memory=8Gi \
   --dv-url=http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow \
-  --cloudinit=workload/cloudinit-dirty-mem-pages.yaml \
+  --cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml \
   --env DIRTY_RATE_FRACTION=0.4 \
   --vms=1
 ```
@@ -508,7 +508,7 @@
 | `--cores=4` | Guest sees 4 CPU cores | Yes -- `cores=4`; `nproc` shows 4 |
 | `--memory=8Gi` | Guest sees 8Gi memory | Yes -- `mem=8Gi`; `free -h` shows 7.5Gi total |
 | `--dv-url=...` | DV uses `source.http.url` (not DataSource sourceRef) | Yes -- URL confirmed on base DV |
-| `--cloudinit=workload/cloudinit-dirty-mem-pages.yaml` | Dirty-mem cloud-init Secret created | Yes -- `vm-cloudinit` Secret with dirty-mem-pages content |
+| `--cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml` | Dirty-mem cloud-init Secret created | Yes -- `vm-cloudinit` Secret with dirty-mem-pages content |
 | `--env DIRTY_RATE_FRACTION=0.4` | Env var present in Secret in `/etc/default/vstorm-guest-env` | Yes -- `DIRTY_RATE_FRACTION=0.4` confirmed in Secret data |
 | `--vms=1` | 1 VM created | Yes -- `vm-3e0d34-1` Running |
 | dirty-mem-pages service | systemd service running | Yes -- `systemctl is-active dirty-mem-pages` returned "active" |

@@ -209,7 +209,7 @@ setup_file() {
 @test "combo: dv-url + snapshot + custom cloudinit" {
   run bash "$VSTORM" -n --batch-id=cmb010 --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --snapshot-class=ocs-storagecluster-rbdplugin-snapclass \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- URL import ---
@@ -234,7 +234,7 @@ setup_file() {
 @test "combo: dv-url + no-snapshot + custom cloudinit" {
   run bash "$VSTORM" -n --batch-id=cmb011 --datasource=rhel9 \
     --dv-url=http://example.com/disk.qcow2 --no-snapshot \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=2 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- URL import with PVC clone ---
@@ -256,7 +256,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: no-snapshot + cloudinit + 3 namespaces (Secret per ns)" {
   run bash "$VSTORM" -n --batch-id=cmb012 --datasource=rhel9 --no-snapshot \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
     --vms=6 --namespaces=3
   [ "$status" -eq 0 ]
 
@@ -299,7 +299,7 @@ setup_file() {
 # ---------------------------------------------------------------
 @test "combo: no-snapshot + custom basename + cloudinit" {
   run bash "$VSTORM" -n --batch-id=cmb014 --datasource=rhel9 --no-snapshot --basename=fedora \
-    --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=1 --namespaces=1
+    --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=1 --namespaces=1
   [ "$status" -eq 0 ]
 
   # --- Custom basename in Secret name ---

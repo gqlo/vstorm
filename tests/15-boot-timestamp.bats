@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Unit tests for workload/vstorm-boot-timestamp.sh (guest oneshot).
+# Unit tests for workload/shared/vstorm-boot-timestamp.sh (guest oneshot).
 #
 # Exception to the usual `bash "$VSTORM" -n --batch-id=…` dry-run pattern:
 # this suite exercises the standalone guest script directly (file I/O, curl POST
@@ -8,8 +8,8 @@
 
 load 'helpers'
 
-SCRIPT="workload/vstorm-boot-timestamp.sh"
-SERVICE="workload/vstorm-boot-timestamp.service"
+SCRIPT="workload/shared/vstorm-boot-timestamp.sh"
+SERVICE="workload/shared/vstorm-boot-timestamp.service"
 
 setup() {
     # Splice tests run `vstorm -n`, which still queries oc (storageprofile /
@@ -180,10 +180,10 @@ PY
 # ---------------------------------------------------------------
 @test "boot-ts: all workload cloud-inits carry the boot script/service placeholders, not embedded copies" {
     local y
-    for y in workload/cloudinit-fio-workload.yaml \
-             workload/cloudinit-stress-ng-workload.yaml \
-             workload/cloudinit-dirty-mem-pages.yaml \
-             workload/cloudinit-default.yaml; do
+    for y in workload/fio/cloudinit-fio-workload.yaml \
+             workload/stress-ng/cloudinit-stress-ng-workload.yaml \
+             workload/dirty-mem/cloudinit-dirty-mem-pages.yaml \
+             workload/shared/cloudinit-default.yaml; do
         grep -q 'path: /opt/vstorm-boot-timestamp.sh' "$y"
         grep -q 'path: /etc/systemd/system/vstorm-boot-timestamp.service' "$y"
         # Placeholders present (each alone on its line); bodies no longer embedded.
@@ -204,11 +204,11 @@ PY
 # the standalone file's exact bytes; placeholder presence in the profile is
 # covered by the "carry the ... placeholders, not embedded copies" test above.
 @test "boot-ts: vstorm splices the standalone script into cloud-init userdata byte-for-byte" {
-    assert_spliced_matches workload/cloudinit-default.yaml \
+    assert_spliced_matches workload/shared/cloudinit-default.yaml \
         "path: /opt/vstorm-boot-timestamp.sh" "$SCRIPT"
 }
 
 @test "boot-ts: vstorm splices the standalone systemd unit into cloud-init userdata byte-for-byte" {
-    assert_spliced_matches workload/cloudinit-default.yaml \
+    assert_spliced_matches workload/shared/cloudinit-default.yaml \
         "path: /etc/systemd/system/vstorm-boot-timestamp.service" "$SERVICE"
 }

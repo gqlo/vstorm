@@ -92,7 +92,7 @@ no workload) is auto-injected.
 | `cloudinit-default.yaml` | SSH access + boot-timestamp heartbeat only; **no** workload (auto-injected when `--cloudinit` is omitted) | `RESULT_SERVER_URL` | — |
 | `cloudinit-stress-ng-workload.yaml` | CPU / memory stress via stress-ng | `WORKLOAD_TYPE` (`cpu-heavy`\|`balanced`\|`memory-heavy`), `STRESS_TOGETHER`, `CPU_ACTIVE_PROBABILITY`, `MEM_ACTIVE_PROBABILITY`, `*_PERCENT_MIN/MAX`, `DURATION_MIN/MAX` | [stress-ng](docs/cloud-init-stress-ng-workload.md) |
 | `cloudinit-fio-workload.yaml` | Storage I/O via fio (randrw default) | `WORKLOAD_TYPE`, `FIO_SIZE`, `FIO_RW`, `FIO_BS`, `FIO_IODEPTH`, `FIO_NUMJOBS`, `FIO_RUNTIME` | [fio](docs/cloud-init-fio-workload.md) |
-| `cloudinit-dirty-mem-pages.yaml` | Steady anonymous dirty memory (compiles `dirty-mem-pages.c` on first boot) | `DIRTY_RATE_FRACTION` (0.1–0.9 \| byte count \| size e.g. `2G`; default 0.5) | [dirty-mem-pages.c](workload/dirty-mem-pages.c) |
+| `cloudinit-dirty-mem-pages.yaml` | Steady anonymous dirty memory (compiles `dirty-mem-pages.c` on first boot) | `DIRTY_RATE_FRACTION` (0.1–0.9 \| byte count \| size e.g. `2G`; default 0.5) | [dirty-mem-pages.c](workload/dirty-mem/dirty-mem-pages.c) |
 | HammerDB TPROC-C *(design plan — no cloud-init file yet)* | OLTP database load | — | [HammerDB plan](docs/cloud-init-hammerdb-workload.md) |
 
 ### stress-ng (CPU / memory)
@@ -101,10 +101,10 @@ Memory-heavy by default; switch profile with `--env WORKLOAD_TYPE=cpu-heavy|bala
 
 ```bash
 # default (memory-heavy)
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --vms=10 --namespaces=2
 
 # cpu-heavy via env override
-vstorm --cloudinit=workload/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
+vstorm --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml --env WORKLOAD_TYPE=cpu-heavy --vms=5
 ```
 
 Full presets, min/max, and tunables in [docs/cloud-init-stress-ng-workload.md](docs/cloud-init-stress-ng-workload.md).
@@ -115,20 +115,20 @@ Random read/write by default; size and pattern via `--env`. Pair with `--data-di
 to exercise a dedicated data disk (`vdb`), which the profile formats and mounts on `/root/data`.
 
 ```bash
-vstorm --cloudinit=workload/cloudinit-fio-workload.yaml --env FIO_SIZE=2G --vms=5
+vstorm --cloudinit=workload/fio/cloudinit-fio-workload.yaml --env FIO_SIZE=2G --vms=5
 ```
 
 Presets and `--env` tunables in [docs/cloud-init-fio-workload.md](docs/cloud-init-fio-workload.md).
 
 ### Dirty memory
 
-Compiles [`workload/dirty-mem-pages.c`](workload/dirty-mem-pages.c) on first boot and dirties
+Compiles [`workload/dirty-mem/dirty-mem-pages.c`](workload/dirty-mem/dirty-mem-pages.c) on first boot and dirties
 anonymous pages at a steady rate. `DIRTY_RATE_FRACTION` accepts a fraction of RAM (0.1–0.9), a
 byte count (e.g. `1073741824`), or a size (e.g. `512M`, `2G`); capped at 90% of RAM; default 0.5.
 
 ```bash
 vstorm --cores=4 --memory=8Gi \
-  --cloudinit=workload/cloudinit-dirty-mem-pages.yaml \
+  --cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml \
   --dv-url=http://storage.scalelab.redhat.com/lee/vm-images/rhel9-cloud-init.qcow \
   --env DIRTY_RATE_FRACTION=0.4 --vms=1
 ```
@@ -163,7 +163,7 @@ vstorm --service --containerdisk --vms=6 --namespaces=3
 # 7. Descheduler stress-ng workload with UDN + NodePort (l2bridge + DHCP networkData; basename labels the batch)
 vstorm --memory=8Gi --cores=2 \
   --udn-l2 --service \
-  --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+  --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --env STRESS_TOGETHER=0 \
   --env CPU_ACTIVE_PROBABILITY=30 \
   --env MEM_ACTIVE_PROBABILITY=80 \
@@ -176,7 +176,7 @@ Cloud-init user-data is stored in a per-namespace Kubernetes Secret and referenc
 
 ### Default cloud-init
 
-When `--cloudinit` is omitted, vstorm injects [`workload/cloudinit-default.yaml`](workload/cloudinit-default.yaml) in every create mode (URL, DataSource, container disk). It configures:
+When `--cloudinit` is omitted, vstorm injects [`workload/shared/cloudinit-default.yaml`](workload/shared/cloudinit-default.yaml) in every create mode (URL, DataSource, container disk). It configures:
 
 - **Root password**: `password`
 - **PasswordAuthentication** / **PermitRootLogin**: enabled in sshd
@@ -244,7 +244,7 @@ profiles are captured as instantaneous snapshots at dump time.
 vstorm --profile --vms=20 --namespaces=4
 
 # Profile only virt-controller during a 50-VM stress workload run
-vstorm --profile=virt-controller --cloudinit=workload/cloudinit-stress-ng-workload.yaml \
+vstorm --profile=virt-controller --cloudinit=workload/stress-ng/cloudinit-stress-ng-workload.yaml \
   --vms=50 --namespaces=10
 ```
 
@@ -311,7 +311,7 @@ vstorm auto-detects most storage settings from the cluster. Here are the common 
 | VolumeSnapshot never becomes ready | No matching VolumeSnapshotClass for your storage | Pass `--snapshot-class=CLASS`, or omit it to auto-disable snapshots |
 | VMs can't live-migrate | PVCs use ReadWriteOnce (local storage) | Expected -- use shared storage (Ceph/NFS) with RWX for live migration |
 
-In every create mode, when `--cloudinit` is omitted, [`workload/cloudinit-default.yaml`](workload/cloudinit-default.yaml) is auto-injected (root password `password`, boot-timestamp heartbeat only; no fio/stress workload). Override with `--cloudinit=FILE`.
+In every create mode, when `--cloudinit` is omitted, [`workload/shared/cloudinit-default.yaml`](workload/shared/cloudinit-default.yaml) is auto-injected (root password `password`, boot-timestamp heartbeat only; no fio/stress workload). Override with `--cloudinit=FILE`.
 
 VMs are distributed evenly across namespaces, with any remainder allocated to the first namespaces.
 
@@ -344,7 +344,7 @@ The hook runs only the checks relevant to the files you are committing:
 |---|---|
 | `vstorm`, `templates/*`, `helpers/*`, `workload/*`, `tests/*.bats` | `bats tests/` |
 | `monitoring/data-collector/*`, `monitoring/tests/*`, `monitoring/scripts/*` | `python3 -m unittest discover -s monitoring/tests -v` |
-| `helpers/*.yaml`, `workload/*.yaml`, `monitoring/yaml/*.yaml`, `monitoring/tests/fixtures/*.yaml`, `.github/workflows/*.yaml` | `yamllint` on changed files |
+| `helpers/*.yaml`, `workload/*/*.yaml`, `monitoring/yaml/*.yaml`, `monitoring/tests/fixtures/*.yaml`, `.github/workflows/*.yaml` | `yamllint` on changed files |
 | any staged `*.md` / `*.MD` (e.g. `docs/...`, `monitoring/...`) | `markdownlint-cli2` on changed files |
 
 If any check fails, the commit is aborted. Fix the issues and commit again. In emergencies, use `git commit --no-verify` to skip the hook.

@@ -398,7 +398,7 @@ Usage: $0 [options] [number_of_vms (default $NUM_VMS) [number_of_namespaces (def
                                 | | | Default image:
                                 | | | quay.io/containerdisks/fedora:latest
         --cloudinit=FILE        Inject cloud-init user-data from FILE
-                                into each VM (e.g. workload/cloudinit-stress-ng-workload.yaml)
+                                into each VM (e.g. workload/stress-ng/cloudinit-stress-ng-workload.yaml)
         --env KEY=VAL           Set env in guest (repeatable; written to /etc/default/vstorm-guest-env).
                                 | | | RESULT_SERVER_URL defaults to the lab collector
                                 | | | (${DEFAULT_RESULT_SERVER_URL}); override or set
@@ -928,13 +928,13 @@ validate_delete_and_profile_options() {
     fi
 }
 
-# Apply workload/cloudinit-default.yaml when --cloudinit was omitted.
+# Apply workload/shared/cloudinit-default.yaml when --cloudinit was omitted.
 # Safe to call more than once; no-ops if CLOUDINIT_FILE is already set.
 apply_default_cloudinit_if_needed() {
     if [[ -n "$CLOUDINIT_FILE" ]] ; then
 	return 0
     fi
-    CLOUDINIT_FILE="$(dirname "${BASH_SOURCE[0]}")/workload/cloudinit-default.yaml"
+    CLOUDINIT_FILE="$(dirname "${BASH_SOURCE[0]}")/workload/shared/cloudinit-default.yaml"
     if [[ ! -f "$CLOUDINIT_FILE" ]] ; then
 	fatal "Default cloud-init file not found: $CLOUDINIT_FILE"
     fi
@@ -2009,14 +2009,14 @@ firmware:
 	# of embedding a copy in every cloud-init YAML. {VSTORM_GUEST_ENV} is handled
 	# separately below (its value is computed from --env, not read from a file).
 	local -A _ci_file_splices=(
-	    [VSTORM_BOOT_SCRIPT]="vstorm-boot-timestamp.sh"
-	    [VSTORM_BOOT_SERVICE]="vstorm-boot-timestamp.service"
-	    [FIO_WORKLOAD_SCRIPT]="fio_workload.sh"
-	    [FIO_WORKLOAD_SERVICE]="fio-workload.service"
-	    [STRESS_NG_WORKLOAD_SCRIPT]="stress_ng_random_vm.sh"
-	    [STRESS_NG_WORKLOAD_SERVICE]="stress-workload.service"
-	    [DIRTY_MEM_SOURCE]="dirty-mem-pages.c"
-	    [DIRTY_MEM_WORKLOAD_SERVICE]="dirty-mem-pages.service"
+	    [VSTORM_BOOT_SCRIPT]="shared/vstorm-boot-timestamp.sh"
+	    [VSTORM_BOOT_SERVICE]="shared/vstorm-boot-timestamp.service"
+	    [FIO_WORKLOAD_SCRIPT]="fio/fio_workload.sh"
+	    [FIO_WORKLOAD_SERVICE]="fio/fio-workload.service"
+	    [STRESS_NG_WORKLOAD_SCRIPT]="stress-ng/stress_ng_random_vm.sh"
+	    [STRESS_NG_WORKLOAD_SERVICE]="stress-ng/stress-workload.service"
+	    [DIRTY_MEM_SOURCE]="dirty-mem/dirty-mem-pages.c"
+	    [DIRTY_MEM_WORKLOAD_SERVICE]="dirty-mem/dirty-mem-pages.service"
 	)
 	local _workload_dir
 	_workload_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/workload"

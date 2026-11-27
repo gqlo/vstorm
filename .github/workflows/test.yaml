@@ -66,7 +66,7 @@ jobs:
         run: |
           set -e
           shopt -s nullglob
-          _yaml=(helpers/*.yaml workload/*.yaml monitoring/yaml/*.yaml \
+          _yaml=(helpers/*.yaml workload/*/*.yaml monitoring/yaml/*.yaml \
             monitoring/tests/fixtures/*.yaml .github/workflows/*.yaml)
           if ((${#_yaml[@]} == 0)); then
             echo "no YAML files matched" >&2

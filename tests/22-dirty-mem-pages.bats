@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 # Compile the dirty-mem-pages C source and test the argument parser (fractions,
 # byte counts, human-readable sizes) and guards. The standalone
-# workload/dirty-mem-pages.c is the source of truth; vstorm splices it into the
+# workload/dirty-mem/dirty-mem-pages.c is the source of truth; vstorm splices it into the
 # cloud-init YAML at runtime via {DIRTY_MEM_SOURCE}.
 
 load 'helpers'
 
-YAML="workload/cloudinit-dirty-mem-pages.yaml"
-STANDALONE="workload/dirty-mem-pages.c"
+YAML="workload/dirty-mem/cloudinit-dirty-mem-pages.yaml"
+STANDALONE="workload/dirty-mem/dirty-mem-pages.c"
 
 setup_file() {
     if ! command -v gcc >/dev/null 2>&1; then
@@ -77,7 +77,7 @@ run_dmp_ok() {
 @test "DMP: vstorm splices C source and service into cloud-init userdata byte-for-byte" {
     assert_spliced_matches "$YAML" "path: /usr/local/src/dirty-mem-pages.c" "$STANDALONE"
     assert_spliced_matches "$YAML" "path: /etc/systemd/system/dirty-mem-pages.service" \
-        "workload/dirty-mem-pages.service"
+        "workload/dirty-mem/dirty-mem-pages.service"
 }
 
 @test "DMP: compiles with -Wall -Wextra and no warnings" {

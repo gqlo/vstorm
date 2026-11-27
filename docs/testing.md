@@ -73,7 +73,7 @@ One test per README Quick Start example. Each validates the full YAML output end
 
 ### Dirty-rate cloud-init workload
 
-The file [workload/cloudinit-dirty-mem-pages.yaml](../workload/cloudinit-dirty-mem-pages.yaml)
+The file [workload/dirty-mem/cloudinit-dirty-mem-pages.yaml](../workload/dirty-mem/cloudinit-dirty-mem-pages.yaml)
 installs `gcc`, writes `dirty-mem-pages.c`, compiles to `/usr/local/bin/dirty-mem-pages`, and starts
 `dirty-mem-pages.service`. The target memory size is passed from the host with
 **`--env DIRTY_RATE_FRACTION=`*value***, where *value* is a fraction of RAM (0.1–0.9), an explicit
@@ -85,7 +85,7 @@ Example dry-run:
 
 ```bash
 vstorm -n --batch-id=dr-test --datasource=rhel9 --vms=1 --namespaces=1 \
-  --cloudinit=workload/cloudinit-dirty-mem-pages.yaml --env DIRTY_RATE_FRACTION=0.4
+  --cloudinit=workload/dirty-mem/cloudinit-dirty-mem-pages.yaml --env DIRTY_RATE_FRACTION=0.4
 ```
 
 ### Result collector unreachable
@@ -98,7 +98,7 @@ Guest scripts keep working when `RESULT_SERVER_URL` cannot be reached
 | boot-ts unreachable | `tests/15-boot-timestamp.bats` | Timestamp file written; exit 0; POST failure logged (no spool) |
 | boot-ts missing batch id | `tests/15-boot-timestamp.bats` | File written; POST skipped when `VSTORM_BATCH_ID` unset |
 | boot-ts mock 2xx / non-2xx | `tests/15-boot-timestamp.bats` | Payload fields on success; file intact + exit 0 on HTTP 503 |
-| boot-ts embed parity | `tests/15-boot-timestamp.bats` | Each cloud-init embed matches `workload/vstorm-boot-timestamp.sh` |
+| boot-ts embed parity | `tests/15-boot-timestamp.bats` | Each cloud-init embed matches `workload/shared/vstorm-boot-timestamp.sh` |
 | FIO unreachable spool | `tests/14-fio-workload-script.bats` | Job finishes; result kept under `results/` and `results/pending/`; `post_error` recorded |
 | FIO local success | `tests/14-fio-workload-script.bats` | Unreachable collector does not fail the fio job itself |
 
@@ -400,7 +400,7 @@ GitHub Actions runs four jobs on every push and PR to `main`:
 |---|---|---|
 | `test` | `bats` | All tests in `tests/` |
 | `test-python` | `unittest` | `monitoring/tests/` (data-collector, monitoring scripts); installs `monitoring/tests/requirements.txt` |
-| `lint-yaml` | `yamllint` | `helpers/*.yaml`, `workload/*.yaml`, `monitoring/yaml/*.yaml`, `monitoring/tests/fixtures/*.yaml`, `.github/workflows/*.yaml` |
+| `lint-yaml` | `yamllint` | `helpers/*.yaml`, `workload/*/*.yaml`, `monitoring/yaml/*.yaml`, `monitoring/tests/fixtures/*.yaml`, `.github/workflows/*.yaml` |
 | `lint-markdown` | `markdownlint-cli2` | All `*.md` files |
 
 Local pre-commit (`hooks/pre-commit`) also runs `python3 -m unittest discover -s monitoring/tests -v` when staged files touch `monitoring/data-collector/`, `monitoring/tests/`, or `monitoring/scripts/`. Full suite: `./helpers/run-all-tests.sh`.
