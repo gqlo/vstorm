@@ -321,8 +321,11 @@ fi
 # that would win over an appended md5 rule. Drop any existing loopback host
 # rules (IPv4 and IPv6) so our password rules take precedence, then append
 # them. Idempotent: a re-run removes the rules we added and re-appends them.
-sed -i -E '/^[[:space:]]*host[[:space:]].*[[:space:]](127\.0\.0\.1\/32|::1\/128)[[:space:]]/d' \
-    "$PGDATA/pg_hba.conf"
+# The append creates pg_hba.conf if absent, so guard the sed on its existence.
+if [[ -f "$PGDATA/pg_hba.conf" ]]; then
+    sed -i -E '/^[[:space:]]*host[[:space:]].*[[:space:]](127\.0\.0\.1\/32|::1\/128)[[:space:]]/d' \
+        "$PGDATA/pg_hba.conf"
+fi
 printf 'host all all 127.0.0.1/32 md5\nhost all all ::1/128 md5\n' \
     >> "$PGDATA/pg_hba.conf"
 systemctl enable --now postgresql
